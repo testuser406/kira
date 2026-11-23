@@ -11,3 +11,7 @@ fw1_summary.json
 start-kira.ps1
 stop-kira.ps1
 open-firewall-ports.bat
+
+# Sanitized test fixtures must be tracked despite *.log
+!/fw1_samples.log
+!/crates/sfos-core/tests/fixtures/*.log
