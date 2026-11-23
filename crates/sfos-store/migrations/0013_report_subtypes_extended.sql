@@ -1,21 +1,17 @@
--- Add report_subtype to distinguish the 13 report types
-ALTER TABLE report_schedules 
-ADD COLUMN IF NOT EXISTS report_subtype text
-CHECK (report_subtype IN (
-    'user',
-    'department',
-    'safeguarding',
-    'websites_allowed_blocked',
-    'activity_timeline',
-    'internet_searches',
-    'youtube_videos',
-    'online_productivity',
-    'firewall_policy',
-    'security_threat',
-    'network_bandwidth',
-    'vpn_connections',
-    'subnet'
-));
+-- 0012 added report_schedules.report_subtype (plain text). Constrain it to the 13 report types.
+ALTER TABLE report_schedules ADD COLUMN IF NOT EXISTS report_subtype text;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'report_schedules_report_subtype_check') THEN
+        ALTER TABLE report_schedules ADD CONSTRAINT report_schedules_report_subtype_check
+        CHECK (report_subtype IS NULL OR report_subtype IN (
+            'user', 'department', 'safeguarding', 'websites_allowed_blocked',
+            'activity_timeline', 'internet_searches', 'youtube_videos',
+            'online_productivity', 'firewall_policy', 'security_threat',
+            'network_bandwidth', 'vpn_connections', 'subnet'
+        )) NOT VALID;
+    END IF;
+END $$;
 
 -- Index for filtering
 CREATE INDEX IF NOT EXISTS report_schedules_report_subtype_idx 

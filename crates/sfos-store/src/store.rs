@@ -52,6 +52,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0012_report_subtype",
         include_str!("../migrations/0012_report_subtype.sql"),
     ),
+    (
+        "0013_report_subtypes_extended",
+        include_str!("../migrations/0013_report_subtypes_extended.sql"),
+    ),
+    (
+        "0014_seed_templates",
+        include_str!("../migrations/0014_seed_templates.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -398,9 +406,15 @@ impl Store {
                 &[&slug],
             )
             .await?;
-        self.tenant_by_slug(slug)
+        let tenant = self
+            .tenant_by_slug(slug)
             .await?
-            .with_context(|| format!("tenant {slug} missing after insert"))
+            .with_context(|| format!("tenant {slug} missing after insert"))?;
+        client
+            .execute("SELECT seed_default_report_templates($1)", &[&tenant.id])
+            .await
+            .context("seeding default report templates")?;
+        Ok(tenant)
     }
 
     pub async fn copy_events(&self, tenant_id: Uuid, events: &[Event]) -> Result<u64> {
