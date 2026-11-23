@@ -25,7 +25,7 @@ LOG_TYPE_FIELD = re.compile(r'\blog_type="((?:\\.|[^"])*)"')
 CATEGORY_FIELD = re.compile(r'\bhttp_category="((?:\\.|[^"])*)"')
 TIMESTAMP_FIELD = re.compile(r'\btimestamp="([^"]+)"')
 ASSET_FIELD = re.compile(r'(?:src|href)="(/assets/[^"]+)"')
-RELEASE0_DEVICE = "X33010KMQVXTJ26"
+RELEASE0_DEVICE = "X00000TESTSERIAL"
 
 
 def get_json(url: str) -> dict:

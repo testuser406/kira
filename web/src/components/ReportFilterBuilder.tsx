@@ -1,11 +1,8 @@
-import { useCallback, useEffect, useState, useMemo } from "react";
-import { Badge, Button, Card, Input, Select } from "./ui";
+import { useMemo } from "react";
+import { Button, Card, Input, Select } from "./ui";
 
-const ACTIONS = ["allowed", "blocked", "warned"] as const;
-const GROUPS = ["web", "threat", "firewall", "auth", "vpn", "system", "other"] as const;
-const DIMENSIONS = ["users", "domains", "categories", "policies", "threats", "applications", "countries", "devices", "destinations"] as const;
 
-export interface ReportFilters {
+export type ReportFilters = {
   q?: string;
   from?: string;
   to?: string;
@@ -44,21 +41,11 @@ export interface ReportFilters {
   domain_contains?: string;
   vpn_user?: string;
   vpn_tunnel?: string;
-}
-
-const DEFAULT_FILTERS: ReportFilters = {
-  from: "24h",
-  to: "now",
-  limit: 10000,
 };
-
-const ACTIONS = ["allowed", "blocked", "warned"] as const;
-const GROUPS = ["web", "threat", "firewall", "auth", "vpn", "system", "other"] as const;
 
 export function ReportFilterBuilder({
   filters,
   onChange,
-  compact = false,
   showAdvanced = true,
 }: {
   filters: ReportFilters;
@@ -68,7 +55,7 @@ export function ReportFilterBuilder({
 }) {
   const handleChange = (key: keyof ReportFilters, value: any) => {
     const next = { ...filters, [key]: value || undefined };
-    Object.keys(next).forEach((k) => next[k] === undefined && delete next[k]);
+    Object.keys(next).forEach((k) => (next as Record<string, unknown>)[k] === undefined && delete (next as Record<string, unknown>)[k]);
     onChange(next as ReportFilters);
   };
 
@@ -380,7 +367,7 @@ export function ReportFilterBuilder({
               </div>
             </div>
           </>
-        }
+        )}
       </div>
 
       <div className="px-4 py-3 border-t border-white/[0.06] flex justify-end gap-2">

@@ -134,9 +134,9 @@ fn parses_sfos21_iso_timestamps_and_byte_fields() {
         start.ts,
         Utc.with_ymd_and_hms(2026, 10, 3, 10, 45, 28).unwrap()
     );
-    assert_eq!(start.device_name.as_deref(), Some("X33010KMQVXTJ26"));
+    assert_eq!(start.device_name.as_deref(), Some("X00000TESTSERIAL"));
     // SFOS 21 logs the serial as device_serial_id; the dashboard needs it as device_id.
-    assert_eq!(start.device_id.as_deref(), Some("X33010KMQVXTJ26"));
+    assert_eq!(start.device_id.as_deref(), Some("X00000TESTSERIAL"));
     assert!(!start.attrs.contains_key("device_serial_id"));
     assert_eq!(start.log_component.as_deref(), Some("Firewall Rule"));
     assert_eq!(start.con_event.as_deref(), Some("Start"));

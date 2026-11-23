@@ -7,7 +7,6 @@
 
 # Local dev runtime (Postgres data/binaries, logs, pids)
 .runtime/
-fw1_samples.log
 fw1_summary.json
 start-kira.ps1
 stop-kira.ps1
