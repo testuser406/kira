@@ -33,6 +33,7 @@ jobs:
           echo "version=$ver" >> "$GITHUB_OUTPUT"
           if gh release view "v$ver" >/dev/null 2>&1; then echo "needed=false" >> "$GITHUB_OUTPUT"; else echo "needed=true" >> "$GITHUB_OUTPUT"; fi
       - name: Backfill the v0.1.0 baseline release (once)
+        continue-on-error: true
         run: |
           gh release view v0.1.0 >/dev/null 2>&1 || gh release create v0.1.0 --target 92ad09b1d33417a7bbdb4be164804479257d8682 \
             --title "Kira v0.1.0" --notes "Baseline release: syslog collector, SFOS parser, Postgres storage with hourly rollups, dashboards, event explorer, retention and CSV export. Source only; use v0.2.0 or newer for the Windows package."
