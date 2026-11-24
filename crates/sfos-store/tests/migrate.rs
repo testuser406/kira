@@ -11,8 +11,17 @@ async fn migrations_apply_twice_and_seed_templates() {
     let store = Store::connect(&url, 4).expect("connect");
     store.migrate().await.expect("first migrate");
     store.migrate().await.expect("second migrate is a no-op");
-    let tenant = store.ensure_tenant("default", "Test").await.expect("tenant");
-    store.ensure_tenant("default", "Test").await.expect("idempotent");
-    let templates = store.list_report_templates(tenant.id).await.expect("templates");
+    let tenant = store
+        .ensure_tenant("default", "Test")
+        .await
+        .expect("tenant");
+    store
+        .ensure_tenant("default", "Test")
+        .await
+        .expect("idempotent");
+    let templates = store
+        .list_report_templates(tenant.id)
+        .await
+        .expect("templates");
     assert_eq!(templates.len(), 17, "4 original + 13 report-type templates");
 }

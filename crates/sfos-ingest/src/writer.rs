@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::listener::Incoming;
 use crate::metrics::SharedMetrics;
+use crate::pipeline::{Outcome, Pipeline};
 
 /// Drain the queue into per-tenant batches and COPY them into Postgres.
 /// Writes are retried a few times so a brief database blip does not silently
@@ -19,6 +20,7 @@ pub async fn run(
     batch_size: usize,
     batch_ms: u64,
     metrics: SharedMetrics,
+    mut pipeline: Pipeline,
 ) {
     let mut batch: HashMap<Uuid, Vec<Event>> = HashMap::new();
     let mut count = 0usize;
@@ -29,7 +31,20 @@ pub async fn run(
         tokio::select! {
             maybe = rx.recv() => {
                 match maybe {
-                    Some(incoming) => {
+                    Some(mut incoming) => {
+                        match pipeline.process(incoming.tenant_id, &mut incoming.event) {
+                            Outcome::Filtered => {
+                                metrics.filtered.fetch_add(1, Ordering::Relaxed);
+                                continue;
+                            }
+                            Outcome::ResolvedUser => {
+                                metrics.user_resolved.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Outcome::Ambiguous => {
+                                metrics.user_ambiguous.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Outcome::Keep => {}
+                        }
                         batch.entry(incoming.tenant_id).or_default().push(incoming.event);
                         count += 1;
                         if count >= batch_size {

@@ -27,6 +27,7 @@ pub struct Config {
     pub queue_capacity: usize,
     pub max_line: usize,
     pub maintenance_interval_secs: u64,
+    pub pipeline: crate::pipeline::PipelineConfig,
 }
 
 impl Config {
@@ -58,7 +59,15 @@ impl Config {
             partitions_ahead_hours: env_parse("PARTITIONS_AHEAD_HOURS", 48)?.clamp(1, 168),
             queue_capacity: env_parse::<usize>("QUEUE_CAPACITY", 20_000)?.clamp(100, 1_000_000),
             max_line: env_parse::<usize>("MAX_LINE", 64 * 1024)?.clamp(1024, 10 * 1024 * 1024),
-            maintenance_interval_secs: env_parse::<u64>("MAINTENANCE_INTERVAL_SECS", 300)?.clamp(60, 86400),
+            maintenance_interval_secs: env_parse::<u64>("MAINTENANCE_INTERVAL_SECS", 300)?
+                .clamp(60, 86400),
+            pipeline: crate::pipeline::PipelineConfig {
+                drop_noise: crate::pipeline::NoiseRule::parse_list(
+                    &std::env::var("DROP_NOISE").unwrap_or_default(),
+                )?,
+                resolve_users: env_bool("RESOLVE_USERS", true)?,
+                ip_user_ttl_secs: env_parse::<i64>("IP_USER_TTL_MINUTES", 240)?.clamp(1, 1440) * 60,
+            },
         })
     }
 }

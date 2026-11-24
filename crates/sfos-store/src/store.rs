@@ -60,6 +60,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0014_seed_templates",
         include_str!("../migrations/0014_seed_templates.sql"),
     ),
+    ("0015_auth", include_str!("../migrations/0015_auth.sql")),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -146,7 +147,7 @@ pub struct AlertInstance {
 
 #[derive(Clone)]
 pub struct Store {
-    pool: Pool,
+    pub(crate) pool: Pool,
 }
 
 impl Store {
@@ -679,7 +680,10 @@ impl Store {
     }
 
     // Report schedule CRUD
-    pub async fn create_report_schedule(&self, schedule: &ReportSchedule) -> Result<ReportSchedule> {
+    pub async fn create_report_schedule(
+        &self,
+        schedule: &ReportSchedule,
+    ) -> Result<ReportSchedule> {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
@@ -715,7 +719,11 @@ impl Store {
         Ok(rows.iter().map(|row| ReportSchedule::from(row)).collect())
     }
 
-    pub async fn update_report_schedule(&self, id: Uuid, schedule: &ReportSchedule) -> Result<Option<ReportSchedule>> {
+    pub async fn update_report_schedule(
+        &self,
+        id: Uuid,
+        schedule: &ReportSchedule,
+    ) -> Result<Option<ReportSchedule>> {
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
@@ -748,7 +756,10 @@ impl Store {
         Ok(deleted > 0)
     }
 
-    pub async fn get_due_report_schedules(&self, now: chrono::DateTime<Utc>) -> Result<Vec<ReportSchedule>> {
+    pub async fn get_due_report_schedules(
+        &self,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<Vec<ReportSchedule>> {
         let client = self.pool.get().await?;
         let rows = client
             .query(
@@ -761,7 +772,12 @@ impl Store {
         Ok(rows.iter().map(|row| ReportSchedule::from(row)).collect())
     }
 
-    pub async fn update_report_schedule_run(&self, id: Uuid, last_run: chrono::DateTime<Utc>, next_run: chrono::DateTime<Utc>) -> Result<()> {
+    pub async fn update_report_schedule_run(
+        &self,
+        id: Uuid,
+        last_run: chrono::DateTime<Utc>,
+        next_run: chrono::DateTime<Utc>,
+    ) -> Result<()> {
         let client = self.pool.get().await?;
         client
             .execute(
@@ -853,7 +869,10 @@ impl Store {
         Ok(rows.iter().map(|row| ReportTemplate::from(row)).collect())
     }
 
-    pub async fn create_report_template(&self, template: &ReportTemplate) -> Result<ReportTemplate> {
+    pub async fn create_report_template(
+        &self,
+        template: &ReportTemplate,
+    ) -> Result<ReportTemplate> {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
@@ -874,7 +893,9 @@ impl Store {
 
     pub async fn delete_report_template(&self, id: Uuid) -> Result<bool> {
         let client = self.pool.get().await?;
-        let deleted = client.execute("DELETE FROM report_templates WHERE id = $1", &[&id]).await?;
+        let deleted = client
+            .execute("DELETE FROM report_templates WHERE id = $1", &[&id])
+            .await?;
         Ok(deleted > 0)
     }
 
@@ -940,7 +961,9 @@ impl Store {
 
     pub async fn delete_alert_rule(&self, id: Uuid) -> Result<bool> {
         let client = self.pool.get().await?;
-        let deleted = client.execute("DELETE FROM alert_rules WHERE id = $1", &[&id]).await?;
+        let deleted = client
+            .execute("DELETE FROM alert_rules WHERE id = $1", &[&id])
+            .await?;
         Ok(deleted > 0)
     }
 
@@ -968,7 +991,11 @@ impl Store {
         Ok(rows.iter().map(|row| AlertRule::from(row)).collect())
     }
 
-    pub async fn update_alert_rule_last_triggered(&self, id: Uuid, triggered_at: chrono::DateTime<Utc>) -> Result<()> {
+    pub async fn update_alert_rule_last_triggered(
+        &self,
+        id: Uuid,
+        triggered_at: chrono::DateTime<Utc>,
+    ) -> Result<()> {
         let client = self.pool.get().await?;
         client
             .execute(
@@ -998,7 +1025,11 @@ impl Store {
         Ok(AlertInstance::from(&row))
     }
 
-    pub async fn list_alert_instances(&self, tenant_id: Uuid, acknowledged: Option<bool>) -> Result<Vec<AlertInstance>> {
+    pub async fn list_alert_instances(
+        &self,
+        tenant_id: Uuid,
+        acknowledged: Option<bool>,
+    ) -> Result<Vec<AlertInstance>> {
         let client = self.pool.get().await?;
         let rows = match acknowledged {
             Some(ack) => client
@@ -1031,7 +1062,11 @@ impl Store {
         Ok(row.as_ref().map(AlertInstance::from))
     }
 
-    pub async fn acknowledge_alert_instance(&self, id: Uuid, acknowledged_by: &str) -> Result<bool> {
+    pub async fn acknowledge_alert_instance(
+        &self,
+        id: Uuid,
+        acknowledged_by: &str,
+    ) -> Result<bool> {
         let client = self.pool.get().await?;
         let updated = client
             .execute(
@@ -1231,7 +1266,10 @@ impl From<&tokio_postgres::Row> for WebhookDelivery {
 }
 
 impl Store {
-    pub async fn create_webhook_delivery(&self, delivery: &WebhookDelivery) -> Result<WebhookDelivery> {
+    pub async fn create_webhook_delivery(
+        &self,
+        delivery: &WebhookDelivery,
+    ) -> Result<WebhookDelivery> {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
@@ -1251,7 +1289,10 @@ impl Store {
         Ok(WebhookDelivery::from(&row))
     }
 
-    pub async fn list_webhook_deliveries(&self, alert_instance_id: Uuid) -> Result<Vec<WebhookDelivery>> {
+    pub async fn list_webhook_deliveries(
+        &self,
+        alert_instance_id: Uuid,
+    ) -> Result<Vec<WebhookDelivery>> {
         let client = self.pool.get().await?;
         let rows = client
             .query(

@@ -15,6 +15,9 @@ pub struct Metrics {
     pub db_errors: AtomicU64,
     pub dropped: AtomicU64,
     pub queue_high_water: AtomicU64,
+    pub filtered: AtomicU64,
+    pub user_resolved: AtomicU64,
+    pub user_ambiguous: AtomicU64,
 }
 
 impl Metrics {
@@ -44,6 +47,9 @@ impl Metrics {
             "queue_capacity": queue_capacity,
             "queue_utilization_percent": queue_utilization_percent,
             "queue_high_water": self.queue_high_water.load(Ordering::Relaxed),
+            "filtered": self.filtered.load(Ordering::Relaxed),
+            "user_resolved": self.user_resolved.load(Ordering::Relaxed),
+            "user_ambiguous": self.user_ambiguous.load(Ordering::Relaxed),
         })
     }
 }

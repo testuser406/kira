@@ -9,7 +9,10 @@ use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
 use lettre::Transport;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sfos_store::{AlertInstance, AlertRule, ReportResult, ReportSchedule, ReportTemplate, Store, Tenant, WebhookDelivery};
+use sfos_store::{
+    AlertInstance, AlertRule, ReportResult, ReportSchedule, ReportTemplate, Store, Tenant,
+    WebhookDelivery,
+};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 
@@ -29,6 +32,7 @@ pub struct AppState {
     pub smtp_password: Option<String>,
     pub smtp_from: Option<String>,
     pub reports_dir: PathBuf,
+    pub auth: Arc<crate::auth::AuthState>,
 }
 
 #[derive(Debug)]
@@ -1132,9 +1136,13 @@ pub async fn events_export(
         line.push(',');
         line.push_str(&csv_escape(policy.unwrap_or_default()));
         line.push(',');
-        line.push_str(&csv_escape(bytes_up.map(|v| v.to_string()).unwrap_or_default()));
+        line.push_str(&csv_escape(
+            bytes_up.map(|v| v.to_string()).unwrap_or_default(),
+        ));
         line.push(',');
-        line.push_str(&csv_escape(bytes_down.map(|v| v.to_string()).unwrap_or_default()));
+        line.push_str(&csv_escape(
+            bytes_down.map(|v| v.to_string()).unwrap_or_default(),
+        ));
         line.push(',');
         line.push_str(&csv_escape(threat.unwrap_or_default()));
         line.push(',');
@@ -1152,7 +1160,12 @@ pub async fn events_export(
     );
     headers.insert(
         axum::http::header::CONTENT_DISPOSITION,
-        format!("attachment; filename=\"kira-events-{}.csv\"", Utc::now().format("%Y%m%dT%H%M%SZ")).parse().unwrap(),
+        format!(
+            "attachment; filename=\"kira-events-{}.csv\"",
+            Utc::now().format("%Y%m%dT%H%M%SZ")
+        )
+        .parse()
+        .unwrap(),
     );
     Ok((headers, body).into_response())
 }
@@ -1260,11 +1273,13 @@ pub async fn live_dashboards(
         .await?;
     let prod_categories: Vec<serde_json::Value> = prod_categories
         .iter()
-        .map(|row| json!({
-            "key": row.get::<_, String>("cat_key"),
-            "events": row.get::<_, i64>("events"),
-            "bytes": row.get::<_, i64>("bytes"),
-        }))
+        .map(|row| {
+            json!({
+                "key": row.get::<_, String>("cat_key"),
+                "events": row.get::<_, i64>("events"),
+                "bytes": row.get::<_, i64>("bytes"),
+            })
+        })
         .collect();
 
     let prod_apps = client
@@ -1280,11 +1295,13 @@ pub async fn live_dashboards(
         .await?;
     let prod_apps: Vec<serde_json::Value> = prod_apps
         .iter()
-        .map(|row| json!({
-            "key": row.get::<_, String>("app_key"),
-            "events": row.get::<_, i64>("events"),
-            "bytes": row.get::<_, i64>("bytes"),
-        }))
+        .map(|row| {
+            json!({
+                "key": row.get::<_, String>("app_key"),
+                "events": row.get::<_, i64>("events"),
+                "bytes": row.get::<_, i64>("bytes"),
+            })
+        })
         .collect();
 
     let prod_users = client
@@ -1300,11 +1317,13 @@ pub async fn live_dashboards(
         .await?;
     let prod_users: Vec<serde_json::Value> = prod_users
         .iter()
-        .map(|row| json!({
-            "key": row.get::<_, String>("user_key"),
-            "events": row.get::<_, i64>("events"),
-            "bytes": row.get::<_, i64>("bytes"),
-        }))
+        .map(|row| {
+            json!({
+                "key": row.get::<_, String>("user_key"),
+                "events": row.get::<_, i64>("events"),
+                "bytes": row.get::<_, i64>("bytes"),
+            })
+        })
         .collect();
 
     // ---- Security: threats, blocked, recent ----
@@ -1347,14 +1366,16 @@ pub async fn live_dashboards(
         .await?;
     let recent_security: Vec<serde_json::Value> = recent_security
         .iter()
-        .map(|row| json!({
-            "ts": row.get::<_, DateTime<Utc>>("ts"),
-            "name": row.get::<_, String>("name"),
-            "action": row.get::<_, Option<String>>("action"),
-            "src_ip": row.get::<_, Option<String>>("src_ip"),
-            "dst_ip": row.get::<_, Option<String>>("dst_ip"),
-            "message": row.get::<_, Option<String>>("message"),
-        }))
+        .map(|row| {
+            json!({
+                "ts": row.get::<_, DateTime<Utc>>("ts"),
+                "name": row.get::<_, String>("name"),
+                "action": row.get::<_, Option<String>>("action"),
+                "src_ip": row.get::<_, Option<String>>("src_ip"),
+                "dst_ip": row.get::<_, Option<String>>("dst_ip"),
+                "message": row.get::<_, Option<String>>("message"),
+            })
+        })
         .collect();
 
     // ---- VPN ----
@@ -1387,14 +1408,16 @@ pub async fn live_dashboards(
         .await?;
     let vpn_tunnels: Vec<serde_json::Value> = vpn_tunnels
         .iter()
-        .map(|row| json!({
-            "tunnel": row.get::<_, String>("vpn_tunnel"),
-            "user": row.get::<_, String>("vpn_user"),
-            "connections": row.get::<_, i64>("connections"),
-            "bytes_up": row.get::<_, i64>("bytes_up"),
-            "bytes_down": row.get::<_, i64>("bytes_down"),
-            "last_seen": row.get::<_, DateTime<Utc>>("last_seen"),
-        }))
+        .map(|row| {
+            json!({
+                "tunnel": row.get::<_, String>("vpn_tunnel"),
+                "user": row.get::<_, String>("vpn_user"),
+                "connections": row.get::<_, i64>("connections"),
+                "bytes_up": row.get::<_, i64>("bytes_up"),
+                "bytes_down": row.get::<_, i64>("bytes_down"),
+                "last_seen": row.get::<_, DateTime<Utc>>("last_seen"),
+            })
+        })
         .collect();
 
     Ok(Json(json!({
@@ -1456,11 +1479,16 @@ fn send_email(
     };
 
     let mut builder = lettre::message::Message::builder()
-        .from(from.parse().map_err(|_| ApiError::bad_request("invalid from address"))?)
+        .from(
+            from.parse()
+                .map_err(|_| ApiError::bad_request("invalid from address"))?,
+        )
         .subject(subject);
 
     for recipient in to {
-        builder = builder.to(recipient.parse().map_err(|_| ApiError::bad_request("invalid to address"))?);
+        builder = builder.to(recipient
+            .parse()
+            .map_err(|_| ApiError::bad_request("invalid to address"))?);
     }
 
     let email = if let Some(attachment_path) = attachment {
@@ -1485,7 +1513,9 @@ fn send_email(
                 lettre::message::header::ContentType::parse(mime_type)
                     .map_err(|e| ApiError::internal(anyhow::anyhow!("invalid mime type: {e}")))?,
             )
-            .header(lettre::message::header::ContentDisposition::attachment(&file_name))
+            .header(lettre::message::header::ContentDisposition::attachment(
+                &file_name,
+            ))
             .body(String::from_utf8_lossy(&attachment_bytes).to_string());
         builder
             .multipart(
@@ -1496,22 +1526,21 @@ fn send_email(
             .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build email: {e}")))?
     } else {
         builder
-            .singlepart(
-                lettre::message::SinglePart::builder()
-                    .body(body.to_string()),
-            )
+            .singlepart(lettre::message::SinglePart::builder().body(body.to_string()))
             .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build email: {e}")))?
     };
 
     let mailer = lettre::SmtpTransport::relay(host)
         .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to create SMTP transport: {e}")))?
         .port(port)
-        .credentials(lettre::transport::smtp::authentication::Credentials::new(username, password))
+        .credentials(lettre::transport::smtp::authentication::Credentials::new(
+            username, password,
+        ))
         .build();
 
-    mailer.send(&email).map_err(|e| {
-        ApiError::internal(anyhow::anyhow!("failed to send email: {e}"))
-    })?;
+    mailer
+        .send(&email)
+        .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to send email: {e}")))?;
 
     Ok(())
 }
@@ -1591,10 +1620,14 @@ pub async fn create_report_schedule(
     }
     // Validate cron schedule and compute initial next_run
     let now = Utc::now();
-    let next_run = payload.cron_schedule.parse::<cron::Schedule>()
+    let next_run = payload
+        .cron_schedule
+        .parse::<cron::Schedule>()
         .ok()
         .and_then(|schedule| schedule.after(&now).take(1).next())
-        .ok_or_else(|| ApiError::bad_request(format!("invalid cron schedule {:?}", payload.cron_schedule)))?;
+        .ok_or_else(|| {
+            ApiError::bad_request(format!("invalid cron schedule {:?}", payload.cron_schedule))
+        })?;
     let schedule = ReportSchedule {
         id: Uuid::new_v4(),
         tenant_id: tenant.id,
@@ -1650,13 +1683,19 @@ pub async fn update_report_schedule(
     }
     let now = Utc::now();
     // If cron_schedule changed, recompute next_run; otherwise keep existing
-    let cron_schedule = payload.cron_schedule.clone().unwrap_or(existing.cron_schedule.clone());
+    let cron_schedule = payload
+        .cron_schedule
+        .clone()
+        .unwrap_or(existing.cron_schedule.clone());
     let next_run = if payload.cron_schedule.is_some() {
         Some(
-            cron_schedule.parse::<cron::Schedule>()
+            cron_schedule
+                .parse::<cron::Schedule>()
                 .ok()
                 .and_then(|s| s.after(&now).take(1).next())
-                .ok_or_else(|| ApiError::bad_request(format!("invalid cron schedule {:?}", cron_schedule)))?,
+                .ok_or_else(|| {
+                    ApiError::bad_request(format!("invalid cron schedule {:?}", cron_schedule))
+                })?,
         )
     } else {
         existing.next_run
@@ -1816,7 +1855,10 @@ pub async fn download_report_result(
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", content_type)
-        .header("Content-Disposition", format!("attachment; filename=\"{}\"", file_name))
+        .header(
+            "Content-Disposition",
+            format!("attachment; filename=\"{}\"", file_name),
+        )
         .header("Content-Length", content.len())
         .body(axum::body::Body::from(content))
         .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build response: {e}")))?)
@@ -1896,7 +1938,10 @@ pub async fn list_custom_reports(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
     let schedules = state.store.list_report_schedules(tenant.id).await?;
-    let custom: Vec<&ReportSchedule> = schedules.iter().filter(|s| s.report_type == "custom").collect();
+    let custom: Vec<&ReportSchedule> = schedules
+        .iter()
+        .filter(|s| s.report_type == "custom")
+        .collect();
     Ok(Json(json!({
         "reports": custom.iter().map(|r| CustomReportResponse {
             id: r.id,
@@ -1981,7 +2026,10 @@ pub async fn get_custom_report(
     Query(query): Query<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
-    let report = state.store.get_report_schedule(id).await?
+    let report = state
+        .store
+        .get_report_schedule(id)
+        .await?
         .ok_or_else(|| ApiError::not_found("custom report not found"))?;
     if report.tenant_id != tenant.id || report.report_type != "custom" {
         return Err(ApiError::not_found("custom report not found"));
@@ -2010,7 +2058,10 @@ pub async fn update_custom_report(
     Json(payload): Json<CreateCustomReport>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
-    let report = state.store.get_report_schedule(id).await?
+    let report = state
+        .store
+        .get_report_schedule(id)
+        .await?
         .ok_or_else(|| ApiError::not_found("custom report not found"))?;
     if report.tenant_id != tenant.id || report.report_type != "custom" {
         return Err(ApiError::not_found("custom report not found"));
@@ -2036,7 +2087,10 @@ pub async fn update_custom_report(
         created_at: report.created_at,
         updated_at: Utc::now(),
     };
-    let result = state.store.update_report_schedule(id, &updated).await?
+    let result = state
+        .store
+        .update_report_schedule(id, &updated)
+        .await?
         .ok_or_else(|| ApiError::not_found("custom report not found"))?;
     Ok(Json(json!({
         "report": CustomReportResponse {
@@ -2061,7 +2115,10 @@ pub async fn delete_custom_report(
     Query(query): Query<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
-    let report = state.store.get_report_schedule(id).await?
+    let report = state
+        .store
+        .get_report_schedule(id)
+        .await?
         .ok_or_else(|| ApiError::not_found("custom report not found"))?;
     if report.tenant_id != tenant.id || report.report_type != "custom" {
         return Err(ApiError::not_found("custom report not found"));
@@ -2080,7 +2137,10 @@ pub async fn run_custom_report(
     Query(query): Query<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
-    let report = state.store.get_report_schedule(id).await?
+    let report = state
+        .store
+        .get_report_schedule(id)
+        .await?
         .ok_or_else(|| ApiError::not_found("custom report not found"))?;
     if report.tenant_id != tenant.id || report.report_type != "custom" {
         return Err(ApiError::not_found("custom report not found"));
@@ -2089,7 +2149,9 @@ pub async fn run_custom_report(
     generate_and_send_report(&state, &report, now).await?;
     // Fetch the just-created result to return its download info
     let results = state.store.list_report_results(id).await?;
-    let latest = results.into_iter().next()
+    let latest = results
+        .into_iter()
+        .next()
         .ok_or_else(|| ApiError::internal(anyhow::anyhow!("no report result generated")))?;
     Ok(Json(json!({
         "result_id": latest.id,
@@ -2130,11 +2192,18 @@ pub async fn create_alert_rule(
     Json(payload): Json<CreateAlertRule>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let tenant = resolve_tenant(&state, None).await?;
-    if !["threat", "blocked_category", "large_transfer"].contains(&payload.condition_type.as_str()) {
-        return Err(ApiError::bad_request("condition_type must be threat, blocked_category, or large_transfer"));
+    if !["threat", "blocked_category", "large_transfer"].contains(&payload.condition_type.as_str())
+    {
+        return Err(ApiError::bad_request(
+            "condition_type must be threat, blocked_category, or large_transfer",
+        ));
     }
-    if !["low", "medium", "high", "critical"].contains(&payload.severity.as_deref().unwrap_or("medium")) {
-        return Err(ApiError::bad_request("severity must be low, medium, high, or critical"));
+    if !["low", "medium", "high", "critical"]
+        .contains(&payload.severity.as_deref().unwrap_or("medium"))
+    {
+        return Err(ApiError::bad_request(
+            "severity must be low, medium, high, or critical",
+        ));
     }
     let rule = AlertRule {
         id: Uuid::new_v4(),
@@ -2198,7 +2267,9 @@ pub async fn update_alert_rule(
         condition_type: payload.condition_type.unwrap_or(existing.condition_type),
         threshold: payload.threshold.unwrap_or(existing.threshold),
         severity: payload.severity.unwrap_or(existing.severity),
-        cooldown_minutes: payload.cooldown_minutes.unwrap_or(existing.cooldown_minutes),
+        cooldown_minutes: payload
+            .cooldown_minutes
+            .unwrap_or(existing.cooldown_minutes),
         enabled: payload.enabled.unwrap_or(existing.enabled),
         webhook_url: match &payload.webhook_url {
             Some(inner) => inner.clone(),
@@ -2259,7 +2330,10 @@ pub async fn list_alert_instances(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
     let acknowledged = query.get("acknowledged").and_then(|v| v.as_bool());
-    let instances = state.store.list_alert_instances(tenant.id, acknowledged).await?;
+    let instances = state
+        .store
+        .list_alert_instances(tenant.id, acknowledged)
+        .await?;
     Ok(Json(json!({
         "instances": instances.iter().map(|i| AlertInstanceResponse {
             id: i.id,
@@ -2290,11 +2364,16 @@ pub async fn acknowledge_alert_instance(
     if instance.tenant_id != tenant.id {
         return Err(ApiError::not_found("alert instance not found"));
     }
-    let acked = state.store.acknowledge_alert_instance(id, &payload.acknowledged_by).await?;
+    let acked = state
+        .store
+        .acknowledge_alert_instance(id, &payload.acknowledged_by)
+        .await?;
     if acked {
         Ok(Json(json!({"message": "alert acknowledged"})))
     } else {
-        Err(ApiError::not_found("alert instance not found or already acknowledged"))
+        Err(ApiError::not_found(
+            "alert instance not found or already acknowledged",
+        ))
     }
 }
 
@@ -2332,7 +2411,8 @@ pub async fn test_webhook(
     State(_state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let url = payload.get("url")
+    let url = payload
+        .get("url")
         .and_then(|v| v.as_str())
         .ok_or_else(|| ApiError::bad_request("url is required"))?;
 
@@ -2357,7 +2437,9 @@ pub async fn test_webhook(
     if status >= 200 && status < 300 {
         Ok(Json(json!({"status": "ok", "code": status, "body": body})))
     } else {
-        Ok(Json(json!({"status": "error", "code": status, "body": body})))
+        Ok(Json(
+            json!({"status": "error", "code": status, "body": body}),
+        ))
     }
 }
 
@@ -2374,7 +2456,10 @@ pub async fn generate_report_on_demand(
     }
 
     let filters = payload.filters.unwrap_or(serde_json::json!({}));
-    let from = filters.get("from").and_then(|v| v.as_str()).unwrap_or("24h");
+    let from = filters
+        .get("from")
+        .and_then(|v| v.as_str())
+        .unwrap_or("24h");
     let to = filters.get("to").and_then(|v| v.as_str()).unwrap_or("now");
     let now = Utc::now();
 
@@ -2387,12 +2472,30 @@ pub async fn generate_report_on_demand(
     .resolve(now)
     .map_err(|e| ApiError::bad_request(format!("invalid time range: {e}")))?;
 
-    let q = filters.get("q").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let action = filters.get("action").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let group = filters.get("group").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let user = filters.get("user").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let category = filters.get("category").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let device = filters.get("device").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let q = filters
+        .get("q")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let action = filters
+        .get("action")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let group = filters
+        .get("group")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let user = filters
+        .get("user")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let category = filters
+        .get("category")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let device = filters
+        .get("device")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     let client = state.store.pool().get().await?;
     let rows = client
@@ -2494,9 +2597,13 @@ pub async fn generate_report_on_demand(
                 line.push(',');
                 line.push_str(&csv_escape(policy.unwrap_or_default()));
                 line.push(',');
-                line.push_str(&csv_escape(bytes_up.map(|v| v.to_string()).unwrap_or_default()));
+                line.push_str(&csv_escape(
+                    bytes_up.map(|v| v.to_string()).unwrap_or_default(),
+                ));
                 line.push(',');
-                line.push_str(&csv_escape(bytes_down.map(|v| v.to_string()).unwrap_or_default()));
+                line.push_str(&csv_escape(
+                    bytes_down.map(|v| v.to_string()).unwrap_or_default(),
+                ));
                 line.push(',');
                 line.push_str(&csv_escape(threat.unwrap_or_default()));
                 line.push(',');
@@ -2509,7 +2616,11 @@ pub async fn generate_report_on_demand(
             (body.into_bytes(), "text/csv", "csv")
         }
         "pdf" => {
-            let esc = |s: &str| s.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
+            let esc = |s: &str| {
+                s.replace('\\', "\\\\")
+                    .replace('(', "\\(")
+                    .replace(')', "\\)")
+            };
 
             let mut content_str = String::new();
             content_str.push_str("BT /F1 14 Tf 72 740 Td (Kira Security Report) Tj ET\n");
@@ -2519,7 +2630,11 @@ pub async fn generate_report_on_demand(
             ));
             content_str.push_str(&format!(
                 "BT /F1 10 Tf 72 705 Td ({}) Tj ET\n",
-                esc(&format!("Events: {}  Generated: {}", row_count, now.to_rfc3339()))
+                esc(&format!(
+                    "Events: {}  Generated: {}",
+                    row_count,
+                    now.to_rfc3339()
+                ))
             ));
 
             let mut y = 685;
@@ -2560,7 +2675,9 @@ pub async fn generate_report_on_demand(
             pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n");
 
             let off4 = pdf.len();
-            pdf.extend_from_slice(b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+            pdf.extend_from_slice(
+                b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+            );
 
             let off5 = pdf.len();
             pdf.extend_from_slice(b"5 0 obj\n<< /Length ");
@@ -2592,19 +2709,32 @@ pub async fn generate_report_on_demand(
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", content_type)
-        .header("Content-Disposition", format!("attachment; filename=\"{}\"", file_name))
+        .header(
+            "Content-Disposition",
+            format!("attachment; filename=\"{}\"", file_name),
+        )
         .header("Content-Length", content.len())
         .body(axum::body::Body::from(content))
         .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build response: {e}")))?)
 }
 
-pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedule, now: DateTime<Utc>) -> Result<(), ApiError> {
-    let tenant = state.store.tenant_by_id(schedule.tenant_id).await?
+pub async fn generate_and_send_report(
+    state: &AppState,
+    schedule: &ReportSchedule,
+    now: DateTime<Utc>,
+) -> Result<(), ApiError> {
+    let tenant = state
+        .store
+        .tenant_by_id(schedule.tenant_id)
+        .await?
         .ok_or_else(|| ApiError::not_found("tenant not found"))?;
 
     // Parse filters
     let filters = &schedule.filters;
-    let from = filters.get("from").and_then(|v| v.as_str()).unwrap_or("24h");
+    let from = filters
+        .get("from")
+        .and_then(|v| v.as_str())
+        .unwrap_or("24h");
     let to = filters.get("to").and_then(|v| v.as_str()).unwrap_or("now");
 
     // Resolve time range
@@ -2613,15 +2743,35 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
         from: Some(from.to_string()),
         to: Some(to.to_string()),
         interval: None,
-    }.resolve(now).map_err(|e| ApiError::bad_request(format!("invalid time range: {e}")))?;
+    }
+    .resolve(now)
+    .map_err(|e| ApiError::bad_request(format!("invalid time range: {e}")))?;
 
     // Get events
-    let q = filters.get("q").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let action = filters.get("action").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let group = filters.get("group").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let user = filters.get("user").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let category = filters.get("category").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let device = filters.get("device").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let q = filters
+        .get("q")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let action = filters
+        .get("action")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let group = filters
+        .get("group")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let user = filters
+        .get("user")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let category = filters
+        .get("category")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let device = filters
+        .get("device")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     let report_subtype = schedule.report_subtype.as_deref().unwrap_or("generic");
 
@@ -2791,9 +2941,7 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
     };
 
     let client = state.store.pool().get().await?;
-    let rows = client
-        .query(&query_sql, &params)
-        .await?;
+    let rows = client.query(&query_sql, &params).await?;
 
     let row_count = rows.len() as i64;
 
@@ -2851,9 +2999,13 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
                 line.push(',');
                 line.push_str(&csv_escape(policy.unwrap_or_default()));
                 line.push(',');
-                line.push_str(&csv_escape(bytes_up.map(|v| v.to_string()).unwrap_or_default()));
+                line.push_str(&csv_escape(
+                    bytes_up.map(|v| v.to_string()).unwrap_or_default(),
+                ));
                 line.push(',');
-                line.push_str(&csv_escape(bytes_down.map(|v| v.to_string()).unwrap_or_default()));
+                line.push_str(&csv_escape(
+                    bytes_down.map(|v| v.to_string()).unwrap_or_default(),
+                ));
                 line.push(',');
                 line.push_str(&csv_escape(threat.unwrap_or_default()));
                 line.push(',');
@@ -2867,7 +3019,11 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
         }
         "pdf" => {
             // Manual PDF generator (no external deps, Docker-safe)
-            let esc = |s: &str| s.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)");
+            let esc = |s: &str| {
+                s.replace('\\', "\\\\")
+                    .replace('(', "\\(")
+                    .replace(')', "\\)")
+            };
 
             let mut content = String::new();
             content.push_str("BT /F1 14 Tf 72 740 Td (Kira Security Report) Tj ET\n");
@@ -2877,7 +3033,11 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
             ));
             content.push_str(&format!(
                 "BT /F1 10 Tf 72 705 Td ({}) Tj ET\n",
-                esc(&format!("Events: {}  Generated: {}", row_count, now.to_rfc3339()))
+                esc(&format!(
+                    "Events: {}  Generated: {}",
+                    row_count,
+                    now.to_rfc3339()
+                ))
             ));
 
             let mut y = 685;
@@ -2918,7 +3078,9 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
             pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n");
 
             let off4 = pdf.len();
-            pdf.extend_from_slice(b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+            pdf.extend_from_slice(
+                b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+            );
 
             let off5 = pdf.len();
             pdf.extend_from_slice(b"5 0 obj\n<< /Length ");
@@ -2946,7 +3108,12 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
     };
 
     // Store report result
-    let file_name = format!("kira-report-{}-{}.{}", schedule.name.replace(' ', "_"), now.format("%Y%m%dT%H%M%SZ"), extension);
+    let file_name = format!(
+        "kira-report-{}-{}.{}",
+        schedule.name.replace(' ', "_"),
+        now.format("%Y%m%dT%H%M%SZ"),
+        extension
+    );
     let file_path = state.reports_dir.join(&file_name);
 
     // Ensure directory exists
@@ -2967,19 +3134,32 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
 
     // Send email to recipients
     let recipients: Vec<String> = match &schedule.recipients {
-        serde_json::Value::Array(arr) => arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect(),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect(),
         _ => vec![],
     };
 
     if !recipients.is_empty() {
-        let subject = format!("Kira Report: {} ({})", schedule.name, now.format("%Y-%m-%d %H:%M:%S"));
+        let subject = format!(
+            "Kira Report: {} ({})",
+            schedule.name,
+            now.format("%Y-%m-%d %H:%M:%S")
+        );
         let body_text = format!(
             "Kira Report: {}\nGenerated: {}\nTenant: {}\nFormat: {}\nEvents: {}\n\nSee attached file for details.\n",
             schedule.name, now.to_rfc3339(), tenant.name, schedule.format, row_count
         );
 
         // Send email (best effort - log failure but don't fail the report)
-        if let Err(e) = send_email(state, &recipients, &subject, &body_text, Some(&file_path.to_string_lossy())) {
+        if let Err(e) = send_email(
+            state,
+            &recipients,
+            &subject,
+            &body_text,
+            Some(&file_path.to_string_lossy()),
+        ) {
             tracing::warn!(schedule_id = %schedule.id, %e, "failed to send report email");
         } else {
             state.store.mark_report_result_sent(result.id).await?;
@@ -2988,16 +3168,25 @@ pub async fn generate_and_send_report(state: &AppState, schedule: &ReportSchedul
 
     // Update schedule last_run/next_run
     // Compute next_run from the cron schedule (falls back to +1 hour if parsing fails)
-    let next_run = schedule.cron_schedule.parse::<cron::Schedule>()
+    let next_run = schedule
+        .cron_schedule
+        .parse::<cron::Schedule>()
         .ok()
         .and_then(|schedule| schedule.after(&now).take(1).next())
         .unwrap_or_else(|| now + Duration::hours(1));
-    state.store.update_report_schedule_run(schedule.id, now, next_run).await?;
+    state
+        .store
+        .update_report_schedule_run(schedule.id, now, next_run)
+        .await?;
 
     Ok(())
 }
 
-pub async fn evaluate_alert_rules(state: &AppState, tenant_id: Uuid, now: DateTime<Utc>) -> Result<(), ApiError> {
+pub async fn evaluate_alert_rules(
+    state: &AppState,
+    tenant_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<(), ApiError> {
     let rules = state.store.get_enabled_alert_rules(tenant_id).await?;
     if rules.is_empty() {
         return Ok(());
@@ -3023,7 +3212,14 @@ pub async fn evaluate_alert_rules(state: &AppState, tenant_id: Uuid, now: DateTi
                 ).await?;
                 let cnt: i64 = row.get("cnt");
                 if cnt >= threshold {
-                    (true, format!("{} threat events detected in the last hour (threshold: {})", cnt, threshold), cnt)
+                    (
+                        true,
+                        format!(
+                            "{} threat events detected in the last hour (threshold: {})",
+                            cnt, threshold
+                        ),
+                        cnt,
+                    )
                 } else {
                     (false, String::new(), 0)
                 }
@@ -3038,7 +3234,14 @@ pub async fn evaluate_alert_rules(state: &AppState, tenant_id: Uuid, now: DateTi
                 ).await?;
                 let cnt: i64 = row.get("cnt");
                 if cnt >= threshold {
-                    (true, format!("{} blocked events for category '{}' in the last hour (threshold: {})", cnt, category, threshold), cnt)
+                    (
+                        true,
+                        format!(
+                            "{} blocked events for category '{}' in the last hour (threshold: {})",
+                            cnt, category, threshold
+                        ),
+                        cnt,
+                    )
                 } else {
                     (false, String::new(), 0)
                 }
@@ -3051,7 +3254,14 @@ pub async fn evaluate_alert_rules(state: &AppState, tenant_id: Uuid, now: DateTi
                 ).await?;
                 let total: i64 = row.get("total");
                 if total >= threshold {
-                    (true, format!("Total transfer {} bytes in the last hour exceeds threshold {}", total, threshold), total)
+                    (
+                        true,
+                        format!(
+                            "Total transfer {} bytes in the last hour exceeds threshold {}",
+                            total, threshold
+                        ),
+                        total,
+                    )
                 } else {
                     (false, String::new(), 0)
                 }
@@ -3072,7 +3282,10 @@ pub async fn evaluate_alert_rules(state: &AppState, tenant_id: Uuid, now: DateTi
                 acknowledged_by: None,
             };
             let created_instance = state.store.create_alert_instance(&instance).await?;
-            state.store.update_alert_rule_last_triggered(rule.id, now).await?;
+            state
+                .store
+                .update_alert_rule_last_triggered(rule.id, now)
+                .await?;
 
             // Send webhook if configured
             if let Some(webhook_url) = &rule.webhook_url {
@@ -3083,30 +3296,39 @@ pub async fn evaluate_alert_rules(state: &AppState, tenant_id: Uuid, now: DateTi
                 let sev = rule.severity.clone();
                 let rname = rule.name.clone();
                 tokio::spawn(async move {
-                    let (status, response_status_code, response_body, error_message) = match send_webhook(&state_clone, &url, &rname, &msg, &sev, now).await {
-                        Ok((resp_status, resp_body)) => ("sent".to_string(), Some(resp_status as i32), Some(resp_body), None),
-                        Err(e) => {
-                            tracing::error!(webhook_url = %url, %e, "webhook delivery failed");
-                            let err_str = e.to_string();
-                            // Try to extract status code from error message
-                            let status_code = err_str
-                                .strip_prefix("internal server error: ")
-                                .and_then(|s| s.strip_prefix("webhook returned status "))
-                                .and_then(|s| s.split(':').next())
-                                .and_then(|s| s.trim().parse::<i32>().ok());
-                            ("failed".to_string(), status_code, None, Some(err_str))
-                        }
-                    };
-                    let _ = state_clone.store.create_webhook_delivery(&WebhookDelivery {
-                        id: Uuid::new_v4(),
-                        alert_instance_id: instance_id,
-                        webhook_url: url,
-                        status,
-                        response_status_code,
-                        response_body,
-                        error_message,
-                        delivered_at: now,
-                    }).await;
+                    let (status, response_status_code, response_body, error_message) =
+                        match send_webhook(&state_clone, &url, &rname, &msg, &sev, now).await {
+                            Ok((resp_status, resp_body)) => (
+                                "sent".to_string(),
+                                Some(resp_status as i32),
+                                Some(resp_body),
+                                None,
+                            ),
+                            Err(e) => {
+                                tracing::error!(webhook_url = %url, %e, "webhook delivery failed");
+                                let err_str = e.to_string();
+                                // Try to extract status code from error message
+                                let status_code = err_str
+                                    .strip_prefix("internal server error: ")
+                                    .and_then(|s| s.strip_prefix("webhook returned status "))
+                                    .and_then(|s| s.split(':').next())
+                                    .and_then(|s| s.trim().parse::<i32>().ok());
+                                ("failed".to_string(), status_code, None, Some(err_str))
+                            }
+                        };
+                    let _ = state_clone
+                        .store
+                        .create_webhook_delivery(&WebhookDelivery {
+                            id: Uuid::new_v4(),
+                            alert_instance_id: instance_id,
+                            webhook_url: url,
+                            status,
+                            response_status_code,
+                            response_body,
+                            error_message,
+                            delivered_at: now,
+                        })
+                        .await;
                 });
             }
         }
@@ -3228,6 +3450,9 @@ mod tests {
         }
         let mut sorted = RETENTION_CHOICES_HOURS.to_vec();
         sorted.sort_unstable();
-        assert_eq!(RETENTION_CHOICES_HOURS, &sorted, "choices must be sorted ascending");
+        assert_eq!(
+            RETENTION_CHOICES_HOURS, &sorted,
+            "choices must be sorted ascending"
+        );
     }
 }

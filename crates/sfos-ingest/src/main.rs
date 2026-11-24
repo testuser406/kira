@@ -1,6 +1,7 @@
 mod config;
 mod listener;
 mod metrics;
+mod pipeline;
 mod sources;
 mod writer;
 
@@ -98,6 +99,7 @@ async fn main() -> Result<()> {
         cfg.batch_size,
         cfg.batch_ms,
         metrics.clone(),
+        pipeline::Pipeline::new(cfg.pipeline.clone()),
     ));
     let maintenance_task = tokio::spawn(maintenance(
         store.clone(),
@@ -139,7 +141,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn maintenance(store: Store, initial_retention_hours: i64, partitions_ahead_hours: i64, interval_secs: u64) {
+async fn maintenance(
+    store: Store,
+    initial_retention_hours: i64,
+    partitions_ahead_hours: i64,
+    interval_secs: u64,
+) {
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {

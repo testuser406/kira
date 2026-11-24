@@ -1,4 +1,5 @@
 mod api;
+mod auth;
 mod query;
 
 use std::net::SocketAddr;
@@ -14,7 +15,7 @@ use tower_http::compression::CompressionLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tracing_subscriber::EnvFilter;
 
-use crate::api::{AppState, evaluate_alert_rules, generate_and_send_report};
+use crate::api::{evaluate_alert_rules, generate_and_send_report, AppState};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -31,7 +32,8 @@ async fn main() -> Result<()> {
         .parse()
         .context("invalid API_ADDR")?;
     let web_dir = PathBuf::from(std::env::var("WEB_DIR").unwrap_or_else(|_| "web/dist".into()));
-    let reports_dir = PathBuf::from(std::env::var("REPORTS_DIR").unwrap_or_else(|_| "kira_reports".into()));
+    let reports_dir =
+        PathBuf::from(std::env::var("REPORTS_DIR").unwrap_or_else(|_| "kira_reports".into()));
     let tenant_slug = std::env::var("TENANT_SLUG").unwrap_or_else(|_| "default".into());
     let tenant_name = std::env::var("TENANT_NAME").unwrap_or_else(|_| "Default site".into());
     let db_pool_size: usize = std::env::var("DB_POOL_SIZE")
@@ -106,9 +108,7 @@ async fn main() -> Result<()> {
     }
 
     let smtp_host = std::env::var("SMTP_HOST").ok();
-    let smtp_port = std::env::var("SMTP_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok());
+    let smtp_port = std::env::var("SMTP_PORT").ok().and_then(|v| v.parse().ok());
     let smtp_username = std::env::var("SMTP_USERNAME").ok();
     let smtp_password = std::env::var("SMTP_PASSWORD").ok();
     let smtp_from = std::env::var("SMTP_FROM").ok();
@@ -124,7 +124,16 @@ async fn main() -> Result<()> {
         smtp_password,
         smtp_from,
         reports_dir,
+        auth: auth::AuthState::new(auth::AuthConfig::from_env()),
     };
+
+    if state.auth.cfg.disabled {
+        tracing::warn!(
+            "AUTH_DISABLED is set: the dashboard and API are open to anyone who can reach them"
+        );
+    } else {
+        auth::bootstrap_admin(&state.store).await?;
+    }
 
     // Background scheduler: every minute, check due report schedules and evaluate alert rules.
     let scheduler_state = state.clone();
@@ -134,6 +143,9 @@ async fn main() -> Result<()> {
         loop {
             interval.tick().await;
             let now = Utc::now();
+            if let Err(e) = scheduler_state.store.purge_expired_sessions().await {
+                tracing::warn!(%e, "failed to purge expired sessions");
+            }
 
             // Check due report schedules
             match scheduler_state.store.get_due_report_schedules(now).await {
@@ -178,10 +190,7 @@ async fn main() -> Result<()> {
         .route("/api/v1/top", get(api::top))
         .route("/api/v1/dashboard/live", get(api::live_dashboards))
         .route("/api/v1/events", get(api::events))
-        .route(
-            "/api/v1/events/export",
-            get(api::events_export),
-        )
+        .route("/api/v1/events/export", get(api::events_export))
         .route(
             "/api/v1/reports/schedules",
             get(api::list_report_schedules).post(api::create_report_schedule),
@@ -238,10 +247,7 @@ async fn main() -> Result<()> {
             "/api/v1/alerts/rules/{id}",
             put(api::update_alert_rule).delete(api::delete_alert_rule),
         )
-        .route(
-            "/api/v1/alerts/instances",
-            get(api::list_alert_instances),
-        )
+        .route("/api/v1/alerts/instances", get(api::list_alert_instances))
         .route(
             "/api/v1/alerts/instances/{id}/acknowledge",
             post(api::acknowledge_alert_instance),
@@ -250,15 +256,26 @@ async fn main() -> Result<()> {
             "/api/v1/alerts/instances/{id}/webhook-deliveries",
             get(api::list_webhook_deliveries),
         )
-        .route(
-            "/api/v1/webhook/test",
-            post(api::test_webhook),
-        )
+        .route("/api/v1/webhook/test", post(api::test_webhook))
         .route(
             "/api/v1/retention",
             get(api::retention_preview).put(api::update_retention),
         )
+        .route("/api/v1/auth/login", post(auth::login))
+        .route("/api/v1/auth/logout", post(auth::logout))
+        .route("/api/v1/auth/me", get(auth::me))
+        .route("/api/v1/auth/password", post(auth::change_own_password))
+        .route(
+            "/api/v1/users",
+            get(auth::list_users).post(auth::create_user),
+        )
+        .route("/api/v1/users/{id}", delete(auth::delete_user))
+        .route("/api/v1/users/{id}/password", put(auth::reset_password))
         .fallback_service(static_files)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ))
         .layer(CompressionLayer::new())
         .with_state(state);
 
@@ -267,11 +284,14 @@ async fn main() -> Result<()> {
         .with_context(|| format!("cannot bind API on {addr}"))?;
     tracing::info!(%addr, web = %web_dir.display(), "dashboard API listening");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await
-        .context("api server failed")?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+    .await
+    .context("api server failed")?;
     Ok(())
 }

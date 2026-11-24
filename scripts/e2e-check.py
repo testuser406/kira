@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""End-to-end check of a running Kira stack: authentication, roles, and the ingest
+pipeline (noise filtering + IP->user resolution) using real SFOS-shaped syslog.
+
+  python3 scripts/e2e-check.py --api http://127.0.0.1:8080 --collector http://127.0.0.1:8081 \
+      --syslog 127.0.0.1:5514 --user admin --password '...' [--drop-noise conn_start,ip_spoof_broadcast]
+"""
+import argparse, http.cookiejar, json, socket, sys, time, urllib.error, urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+FAILS = []
+
+def check(name, cond, detail=""):
+    print(("PASS " if cond else "FAIL ") + name + (f"  [{detail}]" if detail and not cond else ""))
+    if not cond:
+        FAILS.append(name)
+
+class Client:
+    def __init__(self, base):
+        self.base = base.rstrip("/")
+        self.jar = http.cookiejar.CookieJar()
+        self.op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
+
+    def call(self, method, path, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, method=method,
+                                     headers={"Content-Type": "application/json", "Accept": "application/json"})
+        try:
+            with self.op.open(req, timeout=20) as r:
+                raw = r.read()
+                return r.status, (json.loads(raw) if raw else {})
+        except urllib.error.HTTPError as e:
+            raw = e.read()
+            try:
+                return e.code, json.loads(raw)
+            except Exception:
+                return e.code, {}
+
+def getjson(url):
+    with urllib.request.urlopen(url, timeout=20) as r:
+        return json.loads(r.read())
+
+def line(ts, **kw):
+    base = {"device_name": "E2E-FW", "device_model": "XGS3300", "device_serial_id": "E2E-FW",
+            "log_type": "Firewall", "log_component": "Firewall Rule", "log_subtype": "Allowed",
+            "severity": "Information"}
+    base.update(kw)
+    stamp = ts.strftime("%Y-%m-%dT%H:%M:%S+0000")
+    fields = " ".join(f'{k}="{v}"' for k, v in base.items())
+    return f'<30>device_name="E2E-FW" timestamp="{stamp}" {fields}\n'
+
+def send_tcp(host, port, lines):
+    with socket.create_connection((host, port), timeout=10) as s:
+        s.sendall("".join(lines).encode())
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--api", required=True)
+    ap.add_argument("--collector", required=True)
+    ap.add_argument("--syslog", required=True, help="host:port (TCP)")
+    ap.add_argument("--user", default="admin")
+    ap.add_argument("--password", required=True)
+    ap.add_argument("--drop-noise", default="", help="rules the collector runs with")
+    ap.add_argument("--skip-ratelimit", action="store_true")
+    a = ap.parse_args()
+
+    # ---- authentication & roles
+    anon = Client(a.api)
+    check("healthz is public", anon.call("GET", "/healthz")[0] == 200)
+    check("overview requires login", anon.call("GET", "/api/v1/overview?from=1h")[0] == 401)
+    check("bad password rejected", anon.call("POST", "/api/v1/auth/login", {"username": a.user, "password": "nope-nope-nope"})[0] == 401)
+    admin = Client(a.api)
+    st, body = admin.call("POST", "/api/v1/auth/login", {"username": a.user, "password": a.password})
+    check("admin login", st == 200 and body.get("role") == "admin", str(body))
+    check("session cookie is HttpOnly", any(c.has_nonstandard_attr("HttpOnly") for c in admin.jar))
+    check("me works with cookie", admin.call("GET", "/api/v1/auth/me")[0] == 200)
+    check("overview works when signed in", admin.call("GET", "/api/v1/overview?from=1h")[0] == 200)
+
+    viewer_name = f"viewer{int(time.time())}"
+    st, _ = admin.call("POST", "/api/v1/users", {"username": viewer_name, "password": "viewer-password-1", "role": "viewer"})
+    check("admin creates viewer", st == 201)
+    check("weak password refused", admin.call("POST", "/api/v1/users", {"username": viewer_name + "x", "password": "short", "role": "viewer"})[0] == 400)
+    check("duplicate username refused", admin.call("POST", "/api/v1/users", {"username": viewer_name.upper(), "password": "viewer-password-1", "role": "viewer"})[0] == 409)
+    v = Client(a.api)
+    check("viewer login", v.call("POST", "/api/v1/auth/login", {"username": viewer_name, "password": "viewer-password-1"})[0] == 200)
+    check("viewer can read", v.call("GET", "/api/v1/overview?from=1h")[0] == 200)
+    check("viewer cannot list users", v.call("GET", "/api/v1/users")[0] == 403)
+    check("viewer cannot mutate", v.call("POST", "/api/v1/users", {"username": "zzzzz", "password": "viewer-password-1", "role": "admin"})[0] == 403)
+    check("last admin cannot delete itself", admin.call("DELETE", "/api/v1/users/00000000-0000-0000-0000-000000000000")[0] in (409, 400))
+    v.call("POST", "/api/v1/auth/logout")
+    check("logout invalidates session", v.call("GET", "/api/v1/auth/me")[0] == 401)
+
+    # ---- ingest pipeline with SFOS-shaped syslog
+    host, port = a.syslog.rsplit(":", 1)
+    before = getjson(a.collector.rstrip("/") + "/metrics")
+    now = datetime.now(timezone.utc)
+    tag = f"e2e{int(time.time())}"
+    n = int(time.time()) % 60000
+    ip_known, ip_shared = f"10.{77 + n // 250 % 100}.{n % 250}.5", f"10.{77 + n // 250 % 100}.{n % 250}.9"
+    lines = [
+        # a user is learned for ip_known ...
+        line(now, user_name=tag + "-alice", user_group="Staff", src_ip=ip_known, dst_ip="93.184.216.34", dst_port=443, con_event="Stop", con_id="1", protocol="TCP", bytes_sent=10, bytes_received=20, fw_rule_name="R", src_zone="LAN", dst_zone="WAN"),
+        # ... and later an anonymous line from the same IP should inherit it
+        line(now, src_ip=ip_known, dst_ip="93.184.216.35", dst_port=443, con_event="Stop", con_id="2", protocol="TCP", bytes_sent=1, bytes_received=2, fw_rule_name="R", src_zone="LAN", dst_zone="WAN"),
+        # shared IP: two users -> anonymous line must stay anonymous
+        line(now, user_name=tag + "-bob", src_ip=ip_shared, dst_ip="93.184.216.36", dst_port=443, con_event="Stop", con_id="3", protocol="TCP", fw_rule_name="R", src_zone="LAN", dst_zone="WAN"),
+        line(now, user_name=tag + "-carol", src_ip=ip_shared, dst_ip="93.184.216.36", dst_port=443, con_event="Stop", con_id="4", protocol="TCP", fw_rule_name="R", src_zone="LAN", dst_zone="WAN"),
+        line(now, src_ip=ip_shared, dst_ip="93.184.216.37", dst_port=443, con_event="Stop", con_id="5", protocol="TCP", fw_rule_name="R", src_zone="LAN", dst_zone="WAN"),
+        # noise candidates
+        line(now, src_ip="10.77.0.20", dst_ip="93.184.216.40", dst_port=443, con_event="Start", con_id="6", protocol="TCP", fw_rule_name="R", src_zone="LAN", dst_zone="WAN"),
+        line(now, log_component="IP Spoof", log_subtype="Denied", src_ip="10.77.0.21", dst_ip="255.255.255.255", dst_port=17500, protocol="UDP"),
+    ]
+    send_tcp(host, int(port), lines)
+    time.sleep(4)  # > BATCH_MS
+    after = getjson(a.collector.rstrip("/") + "/metrics")
+    d = lambda k: after[k] - before[k]
+    check("collector parsed all lines", d("parsed") == len(lines), f"parsed +{d('parsed')} of {len(lines)}")
+    check("no rejected lines", d("rejected") == 0)
+    rules = {r for r in a.drop_noise.split(",") if r}
+    expect_filtered = ("conn_start" in rules) + ("ip_spoof_broadcast" in rules)
+    check("noise filter drop count matches config", d("filtered") == expect_filtered, f"filtered +{d('filtered')}, expected {expect_filtered}")
+    check("one IP->user resolution", d("user_resolved") == 1, f"+{d('user_resolved')}")
+    check("shared IP left ambiguous", d("user_ambiguous") == 1, f"+{d('user_ambiguous')}")
+    check("everything kept was written", d("written") == len(lines) - expect_filtered and d("dropped") == 0 and d("db_errors") == 0,
+          f"written +{d('written')}")
+
+    st, ev = admin.call("GET", "/api/v1/events?from=1h&limit=200&q=" + ip_known)
+    rows = ev.get("rows", []) if st == 200 else []
+    named = [r for r in rows if r.get("user") == tag + "-alice"]
+    check("both lines from the known IP are attributed to the user", len(named) >= 2, f"{len(named)} rows")
+    st, ev = admin.call("GET", "/api/v1/events?from=1h&limit=200&q=" + ip_shared)
+    anon = [r for r in ev.get("rows", []) if r.get("dst_ip") == "93.184.216.37"]
+    check("shared-IP line was stored", bool(anon), "row missing")
+    check("shared-IP line has no guessed user", bool(anon) and (anon[0].get("user") or "") in ("", ip_shared), str(anon[:1]))
+
+    # ---- rate limiting last (it would lock this IP out)
+    if not a.skip_ratelimit:
+        t = Client(a.api)
+        codes = [t.call("POST", "/api/v1/auth/login", {"username": "ratelimit-probe", "password": "wrong-password-x"})[0] for _ in range(12)]
+        check("login is rate limited", 429 in codes, str(codes))
+
+    print(f"\n{'ALL PASSED' if not FAILS else 'FAILED: ' + ', '.join(FAILS)}")
+    sys.exit(1 if FAILS else 0)
+
+if __name__ == "__main__":
+    main()

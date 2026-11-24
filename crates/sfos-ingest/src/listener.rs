@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use sfos_core::{Event, parse_with_options};
+use sfos_core::{parse_with_options, Event};
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, Semaphore};
@@ -192,19 +192,19 @@ async fn dispatch_line(
         return Ok(());
     }
     metrics.lines.fetch_add(1, Ordering::Relaxed);
-        match parse_with_options(text, tz_offset_minutes, keep_extended_attributes) {
-            Ok(event) => {
-                metrics.parsed.fetch_add(1, Ordering::Relaxed);
-                tx.send(Incoming { tenant_id, event })
-                    .await
-                    .map_err(|_| anyhow::anyhow!("writer stopped"))?;
-                metrics.queued.fetch_add(1, Ordering::Relaxed);
-                metrics.record_queue_depth(tx.max_capacity() - tx.capacity());
-            }
-            Err(err) => reject(metrics, text, &err.to_string()),
+    match parse_with_options(text, tz_offset_minutes, keep_extended_attributes) {
+        Ok(event) => {
+            metrics.parsed.fetch_add(1, Ordering::Relaxed);
+            tx.send(Incoming { tenant_id, event })
+                .await
+                .map_err(|_| anyhow::anyhow!("writer stopped"))?;
+            metrics.queued.fetch_add(1, Ordering::Relaxed);
+            metrics.record_queue_depth(tx.max_capacity() - tx.capacity());
         }
-        Ok(())
+        Err(err) => reject(metrics, text, &err.to_string()),
     }
+    Ok(())
+}
 
 /// Rejections are expected (other vendors on the same port, truncated packets).
 /// Log the first few and then every 500th to avoid flooding the log.
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn compact_attributes_preserve_device_metadata_only() {
         let line = r#"device="SFW" date=2025-04-14 time=10:32:00 timezone="UTC" device_name="XGS2100" device_id=C01 log_id=031006209001 log_type="Content Filtering" log_component="HTTP" log_subtype="Denied" status="Denied" user_name="alice" src_ip=192.168.1.50 dst_ip=142.250.185.78 src_port=51234 dst_port=443 protocol="TCP" domain="www.google.com" category="Search Engines" url="https://www.google.com/search?q=a+b" http_status=403 sent_bytes=512 recv_bytes=0 message="line one" device_model="XGS" firmware_version="20.0" mac="00:11:22:33:44:55""#;
-        
+
         let event = parse_with_options(line, 0, false).unwrap();
 
         assert_eq!(event.attrs.len(), 2);

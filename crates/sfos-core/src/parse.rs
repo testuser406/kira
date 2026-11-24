@@ -31,7 +31,11 @@ pub fn parse_with_offset(line: &str, default_offset_minutes: i32) -> Result<Even
     parse_with_options(line, default_offset_minutes, true)
 }
 
-pub fn parse_with_options(line: &str, default_offset_minutes: i32, keep_extended_attributes: bool) -> Result<Event, ParseError> {
+pub fn parse_with_options(
+    line: &str,
+    default_offset_minutes: i32,
+    keep_extended_attributes: bool,
+) -> Result<Event, ParseError> {
     let payload = strip_syslog_header(line);
     if payload.trim().is_empty() {
         return Err(ParseError::Empty);
