@@ -1,0 +1,63 @@
+name: Release
+
+# Pushing a tag such as v0.3.0 builds the Windows package and publishes a GitHub release
+# whose notes come from the matching CHANGELOG.md section.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Check the tag matches the Cargo version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if ($tag -ne $ver) { throw "Tag $tag does not match Cargo.toml version $ver" }
+      - run: cargo build --release --locked
+      - run: npm ci && npm run build
+        working-directory: web
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "kira-${{ github.ref_name }}-windows-x64"
+          $d = "dist\$name"
+          New-Item -ItemType Directory -Force "$d\target\release", "$d\web", "$d\scripts\windows" | Out-Null
+          Copy-Item target\release\sfos-api.exe, target\release\sfos-ingest.exe "$d\target\release"
+          Copy-Item web\dist "$d\web\dist" -Recurse
+          Copy-Item scripts\windows\kira.ps1 "$d\scripts\windows"
+          Copy-Item kira.env.example, README.md, CHANGELOG.md "$d"
+          Copy-Item docs "$d\docs" -Recurse
+          Compress-Archive -Path "$d" -DestinationPath "dist\$name.zip"
+          "ZIP=dist\$name.zip" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Release notes from CHANGELOG
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          $lines = Get-Content CHANGELOG.md
+          $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($ver))\]").LineNumber
+          if (-not $start) { "Release $ver" | Set-Content notes.md; exit 0 }
+          $rest = $lines[$start..($lines.Count - 1)]
+          $end = ($rest | Select-String -Pattern '^(## \[|\[.+\]: )' | Select-Object -First 1).LineNumber
+          $body = if ($end) { $rest[0..($end - 2)] } else { $rest }
+          $body | Set-Content notes.md
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $pre = if ("${{ github.ref_name }}" -match '-') { '--prerelease' } else { '' }
+          gh release create "${{ github.ref_name }}" $env:ZIP --title "Kira ${{ github.ref_name }}" --notes-file notes.md $pre
