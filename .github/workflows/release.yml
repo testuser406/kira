@@ -1,16 +1,45 @@
 name: Release
 
-# Pushing a tag such as v0.3.0 builds the Windows package and publishes a GitHub release
-# whose notes come from the matching CHANGELOG.md section.
+# A release is published when the version in Cargo.toml has no GitHub release yet: bump the version
+# and CHANGELOG.md on main and this workflow builds the Windows package, creates the vX.Y.Z tag at
+# that commit and publishes the release (notes come from the matching CHANGELOG.md section).
+# Pushing a vX.Y.Z tag by hand works too.
 on:
   push:
+    branches: [main]
     tags: ["v*.*.*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      needed: ${{ steps.v.outputs.needed }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          ver=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.+)"/\1/')
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          if gh release view "v$ver" >/dev/null 2>&1; then echo "needed=false" >> "$GITHUB_OUTPUT"; else echo "needed=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Backfill the v0.1.0 baseline release (once)
+        run: |
+          gh release view v0.1.0 >/dev/null 2>&1 || gh release create v0.1.0 --target 92ad09b1d33417a7bbdb4be164804479257d8682 \
+            --title "Kira v0.1.0" --notes "Baseline release: syslog collector, SFOS parser, Postgres storage with hourly rollups, dashboards, event explorer, retention and CSV export. Source only; use v0.2.0 or newer for the Windows package."
+
   windows-package:
+    needs: detect
+    if: needs.detect.outputs.needed == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +53,7 @@ jobs:
       - name: Check the tag matches the Cargo version
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $tag = "${{ needs.detect.outputs.version }}"
           $ver = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
           if ($tag -ne $ver) { throw "Tag $tag does not match Cargo.toml version $ver" }
       - run: cargo build --release --locked
@@ -33,7 +62,7 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $name = "kira-${{ github.ref_name }}-windows-x64"
+          $name = "kira-v${{ needs.detect.outputs.version }}-windows-x64"
           $d = "dist\$name"
           New-Item -ItemType Directory -Force "$d\target\release", "$d\web", "$d\scripts\windows" | Out-Null
           Copy-Item target\release\sfos-api.exe, target\release\sfos-ingest.exe "$d\target\release"
@@ -46,7 +75,7 @@ jobs:
       - name: Release notes from CHANGELOG
         shell: pwsh
         run: |
-          $ver = "${{ github.ref_name }}".TrimStart('v')
+          $ver = "${{ needs.detect.outputs.version }}"
           $lines = Get-Content CHANGELOG.md
           $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($ver))\]").LineNumber
           if (-not $start) { "Release $ver" | Set-Content notes.md; exit 0 }
@@ -59,5 +88,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $pre = if ("${{ github.ref_name }}" -match '-') { '--prerelease' } else { '' }
-          gh release create "${{ github.ref_name }}" $env:ZIP --title "Kira ${{ github.ref_name }}" --notes-file notes.md $pre
+          $tag = "v${{ needs.detect.outputs.version }}"
+          $pre = if ($tag -match '-') { '--prerelease' } else { '' }
+          gh release create $tag $env:ZIP --target "${{ github.sha }}" --title "Kira $tag" --notes-file notes.md $pre
