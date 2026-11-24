@@ -37,10 +37,26 @@ function Read-KiraEnv {
 function Find-PgBin($cfg) {
     $candidates = @()
     if ($cfg['PG_BIN']) { $candidates += $cfg['PG_BIN'] }
-    $candidates += (Get-ChildItem (Join-Path $Runtime 'postgres') -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName 'bin' })
-    $candidates += (Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'bin' })
-    foreach ($c in $candidates) { if (Test-Path (Join-Path $c 'pg_ctl.exe')) { return $c } }
-    throw "PostgreSQL binaries not found. Install PostgreSQL 16/17 or set PG_BIN in kira.env."
+    $onPath = Get-Command pg_ctl.exe -ErrorAction SilentlyContinue
+    if ($onPath) { $candidates += (Split-Path $onPath.Source) }
+    $globs = @(
+        (Join-Path $Runtime 'postgres\*\bin'),
+        'C:\Program Files\PostgreSQL\*\bin',
+        'C:\Program Files (x86)\PostgreSQL\*\bin',
+        'C:\PostgreSQL\*\bin',
+        (Join-Path $env:USERPROFILE '*\.runtime\postgres\*\bin'),
+        (Join-Path $env:USERPROFILE 'Documents\*\.runtime\postgres\*\bin')
+    )
+    foreach ($g in $globs) {
+        $candidates += (Get-ChildItem -Path $g -Directory -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | ForEach-Object { $_.FullName })
+    }
+    foreach ($c in $candidates) { if ($c -and (Test-Path (Join-Path $c 'pg_ctl.exe'))) { Write-Host "Using PostgreSQL binaries in $c"; return $c } }
+    throw @"
+PostgreSQL binaries (pg_ctl.exe, initdb.exe) were not found.
+Install PostgreSQL 16 or 17:   winget install PostgreSQL.PostgreSQL.17
+then open a NEW PowerShell and run this again. If PostgreSQL is already somewhere else,
+set PG_BIN=<folder containing pg_ctl.exe> in kira.env.
+"@
 }
 
 function Get-DbPassword($cfg) {

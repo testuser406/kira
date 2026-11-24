@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// exactly one group, which keeps the SQL simple and the numbers additive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum CategoryGroup {
     Web,
     Threat,
@@ -14,6 +15,7 @@ pub enum CategoryGroup {
     Auth,
     Vpn,
     System,
+    #[default]
     Other,
 }
 
@@ -180,10 +182,4 @@ pub struct Event {
 
     /// Everything else on the line, keyed by the original SFOS field name.
     pub attrs: BTreeMap<String, String>,
-}
-
-impl Default for CategoryGroup {
-    fn default() -> Self {
-        Self::Other
-    }
 }

@@ -107,6 +107,7 @@ pub async fn run_tcp(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_tcp(
     mut stream: TcpStream,
     peer: SocketAddr,
@@ -210,7 +211,7 @@ async fn dispatch_line(
 /// Log the first few and then every 500th to avoid flooding the log.
 fn reject(metrics: &SharedMetrics, line: &str, reason: &str) {
     let count = metrics.rejected.fetch_add(1, Ordering::Relaxed) + 1;
-    if count <= 5 || count % 500 == 0 {
+    if count <= 5 || count.is_multiple_of(500) {
         let sample: String = line.chars().take(160).collect();
         tracing::warn!(
             rejected = count,

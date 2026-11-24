@@ -22,6 +22,15 @@ class Client:
         self.jar = http.cookiejar.CookieJar()
         self.op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
 
+    def raw(self, method, path, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, method=method, headers={"Content-Type": "application/json"})
+        try:
+            with self.op.open(req, timeout=60) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
     def call(self, method, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, method=method,
@@ -133,6 +142,27 @@ def main():
     anon = [r for r in ev.get("rows", []) if r.get("dst_ip") == "93.184.216.37"]
     check("shared-IP line was stored", bool(anon), "row missing")
     check("shared-IP line has no guessed user", bool(anon) and (anon[0].get("user") or "") in ("", ip_shared), str(anon[:1]))
+
+    # ---- reports: every subtype renders in both formats, filters apply, custom reports save and run
+    subtypes = ["generic", "user", "department", "safeguarding", "websites_allowed_blocked", "activity_timeline",
+                "internet_searches", "youtube_videos", "online_productivity", "firewall_policy", "security_threat",
+                "network_bandwidth", "vpn_connections", "subnet"]
+    bad = []
+    for sub in subtypes:
+        for fmt in ("csv", "pdf"):
+            st, body = admin.raw("POST", "/api/v1/reports/generate", {"format": fmt, "filters": {"from": "24h", "report_subtype": sub}})
+            if st != 200 or (fmt == "pdf" and not body.startswith(b"%PDF")) or (fmt == "csv" and b"\n" not in body):
+                bad.append(f"{sub}/{fmt}={st}")
+    check("all 13 report subtypes render as CSV and PDF", not bad, ", ".join(bad))
+    st, body = admin.raw("POST", "/api/v1/reports/generate", {"format": "csv", "filters": {"from": "24h", "user": "no-such-user-xyz"}})
+    check("report filters are applied (no match -> header only)", st == 200 and len(body.decode().splitlines()) == 1, f"{st} {len(body.splitlines())} lines")
+    st, body = admin.raw("POST", "/api/v1/reports/generate", {"format": "csv", "filters": {"from": "24h", "dst_port": "443", "sent_bytes_min": 0, "src_zone": "LAN"}})
+    check("advanced report filters accepted", st == 200, str(st))
+    st, c = admin.call("POST", "/api/v1/reports/custom", {"name": f"e2e-{int(time.time())}", "filters": {"from": "24h", "report_subtype": "user"}, "format": "csv", "recipients": []})
+    cid = (c.get("report") or c).get("id") if st == 200 else None
+    check("custom report can be saved", bool(cid), f"{st} {c}")
+    if cid:
+        check("custom report runs", admin.call("POST", f"/api/v1/reports/custom/{cid}/run")[0] == 200)
 
     # ---- rate limiting last (it would lock this IP out)
     if not a.skip_ratelimit:

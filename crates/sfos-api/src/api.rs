@@ -1572,7 +1572,7 @@ async fn send_webhook(
     let status = res.status().as_u16();
     let body = res.text().await.unwrap_or_default();
 
-    if status >= 200 && status < 300 {
+    if (200..300).contains(&status) {
         Ok((status, body))
     } else {
         Err(ApiError::internal(anyhow::anyhow!(
@@ -1852,7 +1852,7 @@ pub async fn download_report_result(
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("report");
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", content_type)
         .header(
@@ -1861,7 +1861,7 @@ pub async fn download_report_result(
         )
         .header("Content-Length", content.len())
         .body(axum::body::Body::from(content))
-        .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build response: {e}")))?)
+        .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build response: {e}")))
 }
 
 // Custom report handlers
@@ -2434,7 +2434,7 @@ pub async fn test_webhook(
     let status = res.status().as_u16();
     let body = res.text().await.unwrap_or_default();
 
-    if status >= 200 && status < 300 {
+    if (200..300).contains(&status) {
         Ok(Json(json!({"status": "ok", "code": status, "body": body})))
     } else {
         Ok(Json(
@@ -2472,241 +2472,26 @@ pub async fn generate_report_on_demand(
     .resolve(now)
     .map_err(|e| ApiError::bad_request(format!("invalid time range: {e}")))?;
 
-    let q = filters
-        .get("q")
+    let subtype = filters
+        .get("report_subtype")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let action = filters
-        .get("action")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let group = filters
-        .get("group")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let user = filters
-        .get("user")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let category = filters
-        .get("category")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let device = filters
-        .get("device")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
+        .unwrap_or("generic")
+        .to_string();
     let client = state.store.pool().get().await?;
-    let rows = client
-        .query(
-            "SELECT ts, log_type, log_component, category_group AS \"group\", action, display_user,
-                    destination, application, category, category_type,
-                    url, src_ip, dst_ip, fw_rule_name,
-                    sent_bytes, recv_bytes, threat_name, message, device_name
-             FROM (
-                 SELECT tenant_id, id, ts, category_group, action, log_type, log_component, device_name,
-                        host(src_ip) AS src_ip, host(dst_ip) AS dst_ip,
-                        domain,
-                        COALESCE(domain, host(dst_ip)::text) AS destination,
-                        COALESCE(NULLIF(user_name, ''), host(src_ip)) AS display_user,
-                        url, application, category,
-                        COALESCE(category_type, attrs->>'http_category_type',
-                                 attrs->>'category_type') AS category_type,
-                        fw_rule_name, sent_bytes, recv_bytes, threat_name, message
-                 FROM events
-             ) e
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-               AND ($4::text IS NULL OR display_user ILIKE '%' || $4 || '%'
-                    OR domain ILIKE '%' || $4 || '%'
-                    OR url ILIKE '%' || $4 || '%'
-                    OR message ILIKE '%' || $4 || '%'
-                    OR threat_name ILIKE '%' || $4 || '%'
-                    OR category ILIKE '%' || $4 || '%'
-                    OR category_type ILIKE '%' || $4 || '%'
-                    OR fw_rule_name ILIKE '%' || $4 || '%'
-                    OR host(src_ip) = $4)
-             AND ($5::text IS NULL OR action = $5)
-             AND ($6::text IS NULL OR category_group = $6)
-             AND ($7::text IS NULL OR display_user ILIKE '%' || $7 || '%')
-             AND ($8::text IS NULL OR category ILIKE '%' || $8 || '%'
-                  OR category_type ILIKE '%' || $8 || '%')
-             AND ($9::text IS NULL OR device_name ILIKE '%' || $9 || '%')
-             ORDER BY ts ASC
-             LIMIT 100000",
-            &[
-                &tenant.id, &range.from, &range.to, &q, &action, &group,
-                &user, &category, &device,
-            ],
-        )
-        .await?;
-
-    let row_count = rows.len() as i64;
-
-    // Generate content
-    let (content, content_type, extension) = match format.as_str() {
-        "csv" => {
-            let mut body = String::from("timestamp,log_type,log_component,group,action,user,destination,application,category,category_type,url,src_ip,dst_ip,policy,bytes_up,bytes_down,threat,message,device\n");
-            for row in &rows {
-                let ts: DateTime<Utc> = row.get("ts");
-                let log_type: String = row.get("log_type");
-                let log_component: Option<String> = row.get("log_component");
-                let group: String = row.get("group");
-                let action: Option<String> = row.get("action");
-                let user: Option<String> = row.get("display_user");
-                let destination: Option<String> = row.get("destination");
-                let application: Option<String> = row.get("application");
-                let category: Option<String> = row.get("category");
-                let category_type: Option<String> = row.get("category_type");
-                let url: Option<String> = row.get("url");
-                let src_ip: Option<String> = row.get("src_ip");
-                let dst_ip: Option<String> = row.get("dst_ip");
-                let policy: Option<String> = row.get("fw_rule_name");
-                let bytes_up: Option<i64> = row.get("sent_bytes");
-                let bytes_down: Option<i64> = row.get("recv_bytes");
-                let threat: Option<String> = row.get("threat_name");
-                let message: Option<String> = row.get("message");
-                let device: Option<String> = row.get("device_name");
-
-                let mut line = String::new();
-                line.push_str(&csv_escape(ts.to_rfc3339()));
-                line.push(',');
-                line.push_str(&csv_escape(log_type));
-                line.push(',');
-                line.push_str(&csv_escape(log_component.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(group));
-                line.push(',');
-                line.push_str(&csv_escape(action.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(user.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(destination.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(application.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(category.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(category_type.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(url.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(src_ip.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(dst_ip.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(policy.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(
-                    bytes_up.map(|v| v.to_string()).unwrap_or_default(),
-                ));
-                line.push(',');
-                line.push_str(&csv_escape(
-                    bytes_down.map(|v| v.to_string()).unwrap_or_default(),
-                ));
-                line.push(',');
-                line.push_str(&csv_escape(threat.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(message.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(device.unwrap_or_default()));
-                line.push('\n');
-                body.push_str(&line);
-            }
-            (body.into_bytes(), "text/csv", "csv")
-        }
-        "pdf" => {
-            let esc = |s: &str| {
-                s.replace('\\', "\\\\")
-                    .replace('(', "\\(")
-                    .replace(')', "\\)")
-            };
-
-            let mut content_str = String::new();
-            content_str.push_str("BT /F1 14 Tf 72 740 Td (Kira Security Report) Tj ET\n");
-            content_str.push_str(&format!(
-                "BT /F1 10 Tf 72 720 Td ({}) Tj ET\n",
-                esc(&format!("Tenant: {}", tenant.name))
-            ));
-            content_str.push_str(&format!(
-                "BT /F1 10 Tf 72 705 Td ({}) Tj ET\n",
-                esc(&format!(
-                    "Events: {}  Generated: {}",
-                    row_count,
-                    now.to_rfc3339()
-                ))
-            ));
-
-            let mut y = 685;
-            for row in rows.iter().take(45) {
-                let ts: chrono::DateTime<Utc> = row.get("ts");
-                let action: Option<String> = row.get("action");
-                let user: Option<String> = row.get("display_user");
-                let destination: Option<String> = row.get("destination");
-                let category: Option<String> = row.get("category");
-                let threat: Option<String> = row.get("threat_name");
-
-                content_str.push_str(&format!(
-                    "BT /F1 8 Tf 72 {} Td ({} | {} | {} | {} | {} | {}) Tj ET\n",
-                    y,
-                    esc(&ts.format("%H:%M:%S").to_string()),
-                    esc(&action.unwrap_or_default()),
-                    esc(&user.unwrap_or_default()),
-                    esc(&destination.unwrap_or_default()),
-                    esc(&category.unwrap_or_default()),
-                    esc(&threat.unwrap_or_default()),
-                ));
-                y -= 11;
-            }
-
-            let content_bytes = content_str.as_bytes();
-            let content_len = content_bytes.len();
-
-            let mut pdf = Vec::new();
-            pdf.extend_from_slice(b"%PDF-1.4\n");
-
-            let off1 = pdf.len();
-            pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-
-            let off2 = pdf.len();
-            pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>\nendobj\n");
-
-            let off3 = pdf.len();
-            pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n");
-
-            let off4 = pdf.len();
-            pdf.extend_from_slice(
-                b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-            );
-
-            let off5 = pdf.len();
-            pdf.extend_from_slice(b"5 0 obj\n<< /Length ");
-            pdf.extend_from_slice(content_len.to_string().as_bytes());
-            pdf.extend_from_slice(b">>\nstream\n");
-            pdf.extend_from_slice(content_bytes);
-            pdf.extend_from_slice(b"\nendstream\nendobj\n");
-
-            let xref_offset = pdf.len();
-            pdf.extend_from_slice(b"xref\n0 6\n");
-            pdf.extend_from_slice(b"0000000000 65535 f \n");
-            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off1).as_bytes());
-            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off2).as_bytes());
-            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off3).as_bytes());
-            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off4).as_bytes());
-            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off5).as_bytes());
-
-            pdf.extend_from_slice(b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n");
-            pdf.extend_from_slice(xref_offset.to_string().as_bytes());
-            pdf.extend_from_slice(b"\n%%EOF\n");
-
-            (pdf, "application/pdf", "pdf")
-        }
-        _ => return Err(ApiError::bad_request("unsupported format")),
-    };
+    let table =
+        crate::report::run(&client, tenant.id, range.from, range.to, &subtype, &filters).await?;
+    let (content, content_type, extension) = crate::report::render(
+        &format,
+        &subtype.replace('_', " "),
+        &tenant.name,
+        now,
+        &table,
+    )
+    .map_err(ApiError::bad_request)?;
 
     let file_name = format!("kira-report-{}.{}", now.format("%Y%m%dT%H%M%SZ"), extension);
 
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", content_type)
         .header(
@@ -2715,7 +2500,7 @@ pub async fn generate_report_on_demand(
         )
         .header("Content-Length", content.len())
         .body(axum::body::Body::from(content))
-        .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build response: {e}")))?)
+        .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to build response: {e}")))
 }
 
 pub async fn generate_and_send_report(
@@ -2747,365 +2532,35 @@ pub async fn generate_and_send_report(
     .resolve(now)
     .map_err(|e| ApiError::bad_request(format!("invalid time range: {e}")))?;
 
-    // Get events
-    let q = filters
-        .get("q")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let action = filters
-        .get("action")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let group = filters
-        .get("group")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let user = filters
-        .get("user")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let category = filters
-        .get("category")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let device = filters
-        .get("device")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
-    let report_subtype = schedule.report_subtype.as_deref().unwrap_or("generic");
-
-    // Build query based on report subtype
-    let (query_sql, params): (String, Vec<&(dyn tokio_postgres::types::ToSql + Sync)>) = match report_subtype {
-        "user" => (
-                    "SELECT COALESCE(NULLIF(user_name, ''), host(src_ip))::text AS user_key,
-                            count(*)::bigint AS events,
-                            count(*) FILTER (WHERE action = 'blocked')::bigint AS blocked,
-                            COALESCE(sum(sent_bytes + recv_bytes), 0)::bigint AS bytes,
-                            COALESCE(sum(sent_bytes), 0)::bigint AS bytes_up,
-                            COALESCE(sum(recv_bytes), 0)::bigint AS bytes_down
-                     FROM events
-                     WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-                     GROUP BY 1 ORDER BY events DESC LIMIT 50".to_string(),
-                    vec![&tenant.id, &range.from, &range.to],
-                ),
-                "department" => (
-                    "SELECT COALESCE(udm.department, 'Unknown')::text AS department_key,
-                            count(*)::bigint AS events,
-                            count(*) FILTER (WHERE action = 'blocked')::bigint AS blocked,
-                            COALESCE(sum(sent_bytes + recv_bytes), 0)::bigint AS bytes,
-                            COALESCE(sum(sent_bytes), 0)::bigint AS bytes_up,
-                            COALESCE(sum(recv_bytes), 0)::bigint AS bytes_down
-                     FROM events e
-                     LEFT JOIN user_department_map udm ON udm.tenant_id = e.tenant_id AND udm.user_identifier = COALESCE(NULLIF(e.user_name, ''), host(e.src_ip))
-                     WHERE e.tenant_id = $1 AND e.ts >= $2 AND e.ts < $3
-                     GROUP BY 1 ORDER BY events DESC LIMIT 50".to_string(),
-                    vec![&tenant.id, &range.from, &range.to],
-                ),
-        "safeguarding" => (
-            "SELECT ts, COALESCE(NULLIF(user_name, ''), host(src_ip)) AS user,
-                    domain, url, category, category_type,
-                    COALESCE(threat_name, reason, message) AS detail,
-                    action
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-               AND (category ILIKE '%social%' OR category ILIKE '%video%' OR category ILIKE '%game%' OR category ILIKE '%chat%' OR category ILIKE '%search%' OR category ILIKE '%adult%' OR category ILIKE '%violence%' OR category ILIKE '%gambling%' OR category ILIKE '%drug%' OR category ILIKE '%weapon%' OR category ILIKE '%hate%' OR category ILIKE '%proxy%' OR category ILIKE '%vpn%' OR category ILIKE '%anonymiz%')
-             ORDER BY ts DESC LIMIT 200".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        "websites_allowed_blocked" => (
-            "SELECT domain, action, count(*)::bigint AS events,
-                    COALESCE(sum(sent_bytes + recv_bytes), 0)::bigint AS bytes
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-               AND domain IS NOT NULL AND domain <> ''
-             GROUP BY 1, 2 ORDER BY events DESC LIMIT 100".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        "activity_timeline" => (
-            "SELECT date_trunc('minute', ts) AS minute,
-                    COALESCE(NULLIF(user_name, ''), host(src_ip)) AS user,
-                    log_type, action, domain, url, category,
-                    COALESCE(sent_bytes, 0) + COALESCE(recv_bytes, 0) AS bytes
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-             ORDER BY ts ASC LIMIT 5000".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        "internet_searches" => (
-            "SELECT ts, COALESCE(NULLIF(user_name, ''), host(src_ip)) AS user,
-                    url, domain, category, COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') AS category_type
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-               AND category ILIKE '%search%'
-             ORDER BY ts DESC LIMIT 500".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        "youtube_videos" => (
-            "SELECT ts, COALESCE(NULLIF(user_name, ''), host(src_ip)) AS user,
-                    url, domain, application, sent_bytes, recv_bytes
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-               AND (domain ILIKE '%youtube.com' OR domain ILIKE '%youtu.be' OR application ILIKE '%YouTube%')
-             ORDER BY ts DESC LIMIT 500".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        "online_productivity" => (
-            "SELECT COALESCE(NULLIF(user_name, ''), host(src_ip)) AS user,
-                    CASE WHEN category ILIKE '%productiv%' OR category ILIKE '%business%' OR category ILIKE '%work%' OR category ILIKE '%office%' OR category ILIKE '%education%' OR category ILIKE '%reference%' THEN 'productive'
-                         WHEN category ILIKE '%social%' OR category ILIKE '%game%' OR category ILIKE '%video%' OR category ILIKE '%chat%' OR category ILIKE '%entertain%' OR category ILIKE '%stream%' THEN 'non-productive'
-                         ELSE 'neutral' END AS productivity_class,
-                    count(*)::bigint AS events,
-                    COALESCE(sum(sent_bytes + recv_bytes), 0)::bigint AS bytes
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-             GROUP BY 1, 2 ORDER BY 1, events DESC".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        "firewall_policy" => (
-            "SELECT COALESCE(NULLIF(fw_rule_name, ''), 'unknown') AS policy,
-                    count(*)::bigint AS events,
-                    count(*) FILTER (WHERE action = 'blocked')::bigint AS blocked,
-                    count(*) FILTER (WHERE action = 'allowed')::bigint AS allowed,
-                    COALESCE(sum(sent_bytes + recv_bytes), 0)::bigint AS bytes
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-             GROUP BY 1 ORDER BY events DESC LIMIT 50".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        "security_threat" => (
-            "SELECT COALESCE(NULLIF(threat_name, ''), NULLIF(reason, ''), log_type) AS threat,
-                    count(*)::bigint AS events,
-                    count(*) FILTER (WHERE action = 'blocked')::bigint AS blocked,
-                    COALESCE(sum(sent_bytes + recv_bytes), 0)::bigint AS bytes
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3 AND category_group = 'threat'
-             GROUP BY 1 ORDER BY events DESC LIMIT 50".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        "network_bandwidth" => (
-            "SELECT COALESCE(NULLIF(application, ''), COALESCE(NULLIF(category, ''), 'direct'))::text AS bw_key,
-                    COALESCE(sum(sent_bytes), 0)::bigint AS bytes_up,
-                    COALESCE(sum(recv_bytes), 0)::bigint AS bytes_down,
-                    COALESCE(sum(sent_bytes + recv_bytes), 0)::bigint AS bytes_total,
-                    count(*)::bigint AS events
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-             GROUP BY 1 ORDER BY bytes_total DESC LIMIT 50".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        "vpn_connections" => (
-            "SELECT COALESCE(NULLIF(vpn_user, ''), 'unknown')::text AS vpn_user,
-                    COALESCE(NULLIF(vpn_tunnel, ''), 'unknown')::text AS vpn_tunnel,
-                    count(*)::bigint AS connections,
-                    COALESCE(sum(sent_bytes), 0)::bigint AS bytes_up,
-                    COALESCE(sum(recv_bytes), 0)::bigint AS bytes_down,
-                    max(ts) AS last_seen
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3 AND category_group = 'vpn'
-             GROUP BY 1, 2 ORDER BY last_seen DESC LIMIT 50".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        "subnet" => (
-            "SELECT COALESCE(host(src_ip), 'unknown') AS src_subnet,
-                    COALESCE(host(dst_ip), 'unknown') AS dst_subnet,
-                    count(*)::bigint AS events,
-                    COALESCE(sum(sent_bytes), 0)::bigint AS bytes_up,
-                    COALESCE(sum(recv_bytes), 0)::bigint AS bytes_down,
-                    COALESCE(sum(sent_bytes + recv_bytes), 0)::bigint AS bytes_total
-             FROM events
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-             GROUP BY 1, 2 ORDER BY bytes_total DESC LIMIT 100".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-        _ => (
-            "SELECT ts, log_type, log_component, category_group, action, display_user,
-                    destination, application, category, category_type,
-                    url, src_ip, dst_ip, fw_rule_name,
-                    sent_bytes, recv_bytes, threat_name, message, device_name
-             FROM (
-                 SELECT tenant_id, id, ts, category_group, action, log_type, log_component, device_name,
-                        host(src_ip) AS src_ip, host(dst_ip) AS dst_ip,
-                        domain,
-                        COALESCE(NULLIF(user_name, ''), host(src_ip)) AS display_user,
-                        url, application, category,
-                        COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') AS category_type,
-                        fw_rule_name, sent_bytes, recv_bytes, threat_name, message
-                 FROM events
-             ) e
-             WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
-             ORDER BY ts ASC
-             LIMIT 100000".to_string(),
-            vec![&tenant.id, &range.from, &range.to],
-        ),
-    };
-
+    let report_subtype = schedule
+        .report_subtype
+        .clone()
+        .or_else(|| {
+            filters
+                .get("report_subtype")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| "generic".to_string());
     let client = state.store.pool().get().await?;
-    let rows = client.query(&query_sql, &params).await?;
-
-    let row_count = rows.len() as i64;
-
-    // Generate content
-    let (content, _content_type, extension) = match schedule.format.as_str() {
-        "csv" => {
-            let mut body = String::from("timestamp,log_type,log_component,group,action,user,destination,application,category,category_type,url,src_ip,dst_ip,policy,bytes_up,bytes_down,threat,message,device\n");
-            for row in &rows {
-                let ts: DateTime<Utc> = row.get("ts");
-                let log_type: String = row.get("log_type");
-                let log_component: Option<String> = row.get("log_component");
-                let group: String = row.get("group");
-                let action: Option<String> = row.get("action");
-                let user: Option<String> = row.get("display_user");
-                let destination: Option<String> = row.get("destination");
-                let application: Option<String> = row.get("application");
-                let category: Option<String> = row.get("category");
-                let category_type: Option<String> = row.get("category_type");
-                let url: Option<String> = row.get("url");
-                let src_ip: Option<String> = row.get("src_ip");
-                let dst_ip: Option<String> = row.get("dst_ip");
-                let policy: Option<String> = row.get("fw_rule_name");
-                let bytes_up: Option<i64> = row.get("sent_bytes");
-                let bytes_down: Option<i64> = row.get("recv_bytes");
-                let threat: Option<String> = row.get("threat_name");
-                let message: Option<String> = row.get("message");
-                let device: Option<String> = row.get("device_name");
-
-                let mut line = String::new();
-                line.push_str(&csv_escape(ts.to_rfc3339()));
-                line.push(',');
-                line.push_str(&csv_escape(log_type));
-                line.push(',');
-                line.push_str(&csv_escape(log_component.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(group));
-                line.push(',');
-                line.push_str(&csv_escape(action.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(user.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(destination.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(application.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(category.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(category_type.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(url.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(src_ip.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(dst_ip.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(policy.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(
-                    bytes_up.map(|v| v.to_string()).unwrap_or_default(),
-                ));
-                line.push(',');
-                line.push_str(&csv_escape(
-                    bytes_down.map(|v| v.to_string()).unwrap_or_default(),
-                ));
-                line.push(',');
-                line.push_str(&csv_escape(threat.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(message.unwrap_or_default()));
-                line.push(',');
-                line.push_str(&csv_escape(device.unwrap_or_default()));
-                line.push('\n');
-                body.push_str(&line);
-            }
-            (body.into_bytes(), "text/csv", "csv")
-        }
-        "pdf" => {
-            // Manual PDF generator (no external deps, Docker-safe)
-            let esc = |s: &str| {
-                s.replace('\\', "\\\\")
-                    .replace('(', "\\(")
-                    .replace(')', "\\)")
-            };
-
-            let mut content = String::new();
-            content.push_str("BT /F1 14 Tf 72 740 Td (Kira Security Report) Tj ET\n");
-            content.push_str(&format!(
-                "BT /F1 10 Tf 72 720 Td ({}) Tj ET\n",
-                esc(&format!("Tenant: {}", tenant.name))
-            ));
-            content.push_str(&format!(
-                "BT /F1 10 Tf 72 705 Td ({}) Tj ET\n",
-                esc(&format!(
-                    "Events: {}  Generated: {}",
-                    row_count,
-                    now.to_rfc3339()
-                ))
-            ));
-
-            let mut y = 685;
-            for row in rows.iter().take(45) {
-                let ts: chrono::DateTime<Utc> = row.get("ts");
-                let action: Option<String> = row.get("action");
-                let user: Option<String> = row.get("display_user");
-                let destination: Option<String> = row.get("destination");
-                let category: Option<String> = row.get("category");
-                let threat: Option<String> = row.get("threat_name");
-
-                content.push_str(&format!(
-                    "BT /F1 8 Tf 72 {} Td ({} | {} | {} | {} | {} | {}) Tj ET\n",
-                    y,
-                    esc(&ts.format("%H:%M:%S").to_string()),
-                    esc(&action.unwrap_or_default()),
-                    esc(&user.unwrap_or_default()),
-                    esc(&destination.unwrap_or_default()),
-                    esc(&category.unwrap_or_default()),
-                    esc(&threat.unwrap_or_default()),
-                ));
-                y -= 11;
-            }
-
-            let content_bytes = content.as_bytes();
-            let content_len = content_bytes.len();
-
-            let mut pdf = Vec::new();
-            pdf.extend_from_slice(b"%PDF-1.4\n");
-
-            let off1 = pdf.len();
-            pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-
-            let off2 = pdf.len();
-            pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 612 792] >>\nendobj\n");
-
-            let off3 = pdf.len();
-            pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n");
-
-            let off4 = pdf.len();
-            pdf.extend_from_slice(
-                b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-            );
-
-            let off5 = pdf.len();
-            pdf.extend_from_slice(b"5 0 obj\n<< /Length ");
-            pdf.extend_from_slice(content_len.to_string().as_bytes());
-            pdf.extend_from_slice(b">>\nstream\n");
-            pdf.extend_from_slice(content_bytes);
-            pdf.extend_from_slice(b"\nendstream\nendobj\n");
-
-            let xref_offset = pdf.len();
-            pdf.extend_from_slice(b"xref\n0 6\n");
-            pdf.extend_from_slice(b"0000000000 65535 f \n");
-            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off1).as_bytes());
-            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off2).as_bytes());
-            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off3).as_bytes());
-            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off4).as_bytes());
-            pdf.extend_from_slice(&format!("{:010} 00000 n \n", off5).as_bytes());
-
-            pdf.extend_from_slice(b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n");
-            pdf.extend_from_slice(xref_offset.to_string().as_bytes());
-            pdf.extend_from_slice(b"\n%%EOF\n");
-
-            (pdf, "application/pdf", "pdf")
-        }
-        _ => return Err(ApiError::bad_request("unsupported format")),
-    };
+    let table = crate::report::run(
+        &client,
+        tenant.id,
+        range.from,
+        range.to,
+        &report_subtype,
+        filters,
+    )
+    .await?;
+    let row_count = table.rows.len() as i64;
+    let (content, _content_type, extension) = crate::report::render(
+        &schedule.format,
+        &format!("{} ({})", schedule.name, report_subtype.replace('_', " ")),
+        &tenant.name,
+        now,
+        &table,
+    )
+    .map_err(ApiError::bad_request)?;
 
     // Store report result
     let file_name = format!(

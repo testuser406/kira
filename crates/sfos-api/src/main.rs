@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod query;
+mod report;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

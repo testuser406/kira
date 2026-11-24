@@ -61,6 +61,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/0014_seed_templates.sql"),
     ),
     ("0015_auth", include_str!("../migrations/0015_auth.sql")),
+    (
+        "0016_custom_report_cron",
+        include_str!("../migrations/0016_custom_report_cron.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -716,7 +720,7 @@ impl Store {
                 &[&tenant_id],
             )
             .await?;
-        Ok(rows.iter().map(|row| ReportSchedule::from(row)).collect())
+        Ok(rows.iter().map(ReportSchedule::from).collect())
     }
 
     pub async fn update_report_schedule(
@@ -769,7 +773,7 @@ impl Store {
                 &[&now],
             )
             .await?;
-        Ok(rows.iter().map(|row| ReportSchedule::from(row)).collect())
+        Ok(rows.iter().map(ReportSchedule::from).collect())
     }
 
     pub async fn update_report_schedule_run(
@@ -817,7 +821,7 @@ impl Store {
                 &[&schedule_id],
             )
             .await?;
-        Ok(rows.iter().map(|row| ReportResult::from(row)).collect())
+        Ok(rows.iter().map(ReportResult::from).collect())
     }
 
     pub async fn get_report_schedule(&self, id: Uuid) -> Result<Option<ReportSchedule>> {
@@ -866,7 +870,7 @@ impl Store {
                 &[&tenant_id],
             )
             .await?;
-        Ok(rows.iter().map(|row| ReportTemplate::from(row)).collect())
+        Ok(rows.iter().map(ReportTemplate::from).collect())
     }
 
     pub async fn create_report_template(
@@ -932,7 +936,7 @@ impl Store {
                 &[&tenant_id],
             )
             .await?;
-        Ok(rows.iter().map(|row| AlertRule::from(row)).collect())
+        Ok(rows.iter().map(AlertRule::from).collect())
     }
 
     pub async fn update_alert_rule(&self, id: Uuid, rule: &AlertRule) -> Result<Option<AlertRule>> {
@@ -988,7 +992,7 @@ impl Store {
                 &[&tenant_id],
             )
             .await?;
-        Ok(rows.iter().map(|row| AlertRule::from(row)).collect())
+        Ok(rows.iter().map(AlertRule::from).collect())
     }
 
     pub async fn update_alert_rule_last_triggered(
@@ -1047,7 +1051,7 @@ impl Store {
                 )
                 .await?,
         };
-        Ok(rows.iter().map(|row| AlertInstance::from(row)).collect())
+        Ok(rows.iter().map(AlertInstance::from).collect())
     }
 
     pub async fn get_alert_instance(&self, id: Uuid) -> Result<Option<AlertInstance>> {
@@ -1301,6 +1305,6 @@ impl Store {
                 &[&alert_instance_id],
             )
             .await?;
-        Ok(rows.iter().map(|row| WebhookDelivery::from(row)).collect())
+        Ok(rows.iter().map(WebhookDelivery::from).collect())
     }
 }

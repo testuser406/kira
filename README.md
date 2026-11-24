@@ -56,7 +56,7 @@ PowerShell window in the repository folder unless a step says Administrator.
 | PostgreSQL 16 or 17 | `winget install PostgreSQL.PostgreSQL.17` (or unzip the EDB binaries into `.runtime\postgres\`) | event storage |
 
 Open a **new** PowerShell afterwards and check: `git --version; cargo --version; node --version; where.exe initdb`
-(if `initdb` is not found that is fine, the script finds PostgreSQL in `C:\Program Files\PostgreSQL\*\bin`).
+(if `initdb` is not found that is fine: the script looks in `PATH`, `C:\Program Files\PostgreSQL\*\bin` and `.runtime\postgres\*\bin`; otherwise set `PG_BIN` in `kira.env`).
 Kira keeps its own database cluster on port 55432 inside `.runtime\`, so it does not touch an existing PostgreSQL service.
 
 ### 2. Get the code
@@ -315,6 +315,6 @@ Next, in priority order:
 2. **Site Clean and browse time**: filter ads/CDN/telemetry/background requests, estimate time spent per site.
 3. **Report data**: department report (uses `user_department_map`), search terms and YouTube titles (needs SSL/TLS
    inspection on the firewall), safeguarding report, productivity categories.
-4. **Delivery**: custom/scheduled report SQL currently ignores the user/category/action filters (they are read but not applied); report templates as files, alert throttling, Zulip-formatted alert payloads.
+4. **Delivery**: report templates as files, alert throttling, Zulip-formatted alert payloads.
 5. **Operations**: run as a real Windows service, automated backups, `/metrics` in Prometheus format, ClickHouse option for
    very high volumes, spill-to-disk queue so a database outage loses nothing.

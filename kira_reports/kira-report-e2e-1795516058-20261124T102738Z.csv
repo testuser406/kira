@@ -1,0 +1,5 @@
+user_key,events,blocked,bytes,bytes_up,bytes_down
+e2e1795516054-alice,2,0,33,11,22
+10.141.54.9,1,0,0,0,0
+e2e1795516054-bob,1,0,0,0,0
+e2e1795516054-carol,1,0,0,0,0
