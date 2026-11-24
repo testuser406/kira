@@ -278,7 +278,7 @@ npm --prefix web ci && npm --prefix web run typecheck && npm --prefix web run bu
 scripts/dev.sh start                      # Linux/macOS local stack; Windows: scripts\\windows\\kira.ps1
 ```
 
-CI (`.github/workflows/ci.yml`) runs the Rust tests against a Postgres service, the web typecheck/build, the Compose
+CI (`.github/workflows/ci.yml`) runs the Rust tests against a Postgres service, the web typecheck/build
 and an end-to-end job that builds the release binaries, starts them against a Postgres service, replays the sanitized capture and runs
 `scripts/e2e-check.py`.
 
