@@ -182,6 +182,7 @@ impl Pipeline {
         }
     }
 
+    #[cfg(test)]
     pub fn tracked_ips(&self) -> usize {
         self.ips.len()
     }

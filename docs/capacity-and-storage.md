@@ -1,5 +1,7 @@
 # Capacity planning, storage and recovery
 
+> Some commands below were written for a Docker deployment (`docker compose exec …`). For the native install, run the same `psql`/`pg_dump` commands from the PostgreSQL `bin` folder against `127.0.0.1:55432`, database `sfos`, user `kira`.
+
 Measurements and procedures moved out of the README. Figures are specific to the hosts and log mixes described.
 
 This Release 0 baseline was measured on a host reporting a 4-vCPU Intel Xeon Silver 4210R,

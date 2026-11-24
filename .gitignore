@@ -15,3 +15,6 @@ open-firewall-ports.bat
 # Sanitized test fixtures must be tracked despite *.log
 !/fw1_samples.log
 !/crates/sfos-core/tests/fixtures/*.log
+__pycache__/
+*.pyc
+kira.env

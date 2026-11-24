@@ -39,20 +39,95 @@ Status: working core (collection, dashboards, reports, alerts, login). Not yet a
 
 ---
 
-## Quick start
+## Install and run on Windows (no Docker)
 
-Requirements: Docker with Compose v2, and a host your firewall can reach.
+Kira runs as three native programs: PostgreSQL, the collector (`sfos-ingest`) and the API/dashboard
+(`sfos-api`, port **8080**). `scripts\windows\kira.ps1` builds and controls all of them. Use a normal
+PowerShell window in the repository folder unless a step says Administrator.
 
-```bash
-cp .env.example .env     # set POSTGRES_PASSWORD, ADMIN_PASSWORD, TENANT_NAME
-docker compose up -d --build
+### 1. Install the prerequisites (once)
+
+| Tool | Install | Why |
+| --- | --- | --- |
+| Git | `winget install Git.Git` | get and update the code |
+| Rust (MSVC) | `winget install Rustlang.Rustup`, then in a new window `rustup default stable` | compile the services |
+| C++ build tools | `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"` | Rust needs the MSVC linker |
+| Node.js 22 LTS | `winget install OpenJS.NodeJS.LTS` | build the dashboard |
+| PostgreSQL 16 or 17 | `winget install PostgreSQL.PostgreSQL.17` (or unzip the EDB binaries into `.runtime\postgres\`) | event storage |
+
+Open a **new** PowerShell afterwards and check: `git --version; cargo --version; node --version; where.exe initdb`
+(if `initdb` is not found that is fine, the script finds PostgreSQL in `C:\Program Files\PostgreSQL\*\bin`).
+Kira keeps its own database cluster on port 55432 inside `.runtime\`, so it does not touch an existing PostgreSQL service.
+
+### 2. Get the code
+
+```powershell
+git clone https://github.com/testuser406/kira.git
+cd kira
 ```
 
-Open <http://localhost:8082> and sign in as `ADMIN_USERNAME` (default `admin`) with `ADMIN_PASSWORD`. If
-`ADMIN_PASSWORD` is empty a random password is generated and printed once:
-`docker compose logs api | grep "generated password"`. The first administrator is only created when no users exist.
+If PowerShell blocks the script, run once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-Without Docker: `scripts/dev.sh start` (bundled Postgres, state in `.runtime/`), see the script header.
+### 3. Configure
+
+```powershell
+copy kira.env.example kira.env
+notepad kira.env
+```
+
+At minimum set `ADMIN_PASSWORD` (10+ characters) and `TENANT_NAME`. Everything else has a sensible default
+(dashboard on `0.0.0.0:8080`, syslog on `5514`, `DEFAULT_TZ_OFFSET_MINUTES=300` for Pakistan,
+`DROP_NOISE=conn_start,ip_spoof_broadcast`). `kira.env` holds passwords and is ignored by git.
+
+### 4. Build (first time takes several minutes)
+
+```powershell
+.\scripts\windows\kira.ps1 build
+```
+
+This runs `cargo build --release --locked` and builds the dashboard into `web\dist`.
+
+### 5. Create the database (once)
+
+```powershell
+.\scripts\windows\kira.ps1 init
+```
+
+### 6. Open the Windows firewall (once, Administrator PowerShell)
+
+```powershell
+.\scripts\windows\kira.ps1 firewall
+```
+
+It opens TCP 8080 (dashboard) and TCP/UDP 5514 (syslog) for the **Domain and Private** profiles only, never Public.
+
+### 7. Start
+
+```powershell
+.\scripts\windows\kira.ps1 start
+```
+
+Open `http://<this-computer>:8080` and sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`. Then point Sophos at this
+computer's address on port 5514 (see [Configure Sophos Firewall](#configure-sophos-firewall)).
+
+### Everyday commands
+
+| Command | What it does |
+| --- | --- |
+| `.\scripts\windows\kira.ps1 status` | what is running, plus the collector counters |
+| `.\scripts\windows\kira.ps1 stop` | stop API, collector and PostgreSQL |
+| `.\scripts\windows\kira.ps1 autostart` | start Kira when this user logs on |
+| `Get-Content .runtime\logs\api.err.log -Tail 50` | API log (`ingest.err.log` for the collector; `.out.log` files hold stdout) |
+
+**Update to a new version:** `git pull`, then `kira.ps1 stop`, `kira.ps1 build`, `kira.ps1 start`. Database migrations run
+automatically on start. **Start fresh:** `kira.ps1 stop`, delete the `.runtime\pgdata` folder, run `init` again.
+
+**Moving from the old `kira-main` folder:** that folder's PostgreSQL may still be running and holding the log file
+(`pg_ctl: another server might be running`, `Permission denied`). Stop it first with its own `stop-kira.ps1`, or
+`Get-Process postgres, sfos-api, sfos-ingest | Stop-Process -Force`. Raw events are only kept for hours anyway, so
+starting with a new database is usually simplest.
+
+Linux/macOS: `scripts/dev.sh start` builds and runs the same stack with a bundled PostgreSQL.
 
 ---
 
@@ -91,16 +166,16 @@ device uses one that is not recognised, set `DEFAULT_TZ_OFFSET_MINUTES` to that 
 ## Testing with real Sophos syslog
 
 1. Point the firewall's syslog server at the Kira host (above) and watch the collector counters:
-   `curl -s http://<host>:8083/metrics` — `parsed` must rise, `rejected`, `dropped` and `db_errors` must stay 0.
+   `curl.exe -s http://<host>:8081/metrics` — `parsed` must rise, `rejected`, `dropped` and `db_errors` must stay 0.
 2. Replay a capture instead of waiting for traffic (keep real captures out of git; `fw1_samples.log` in this repo is sanitized):
 
    ```bash
-   python3 scripts/replay-real-log.py capture.log --port 5514 --collector http://127.0.0.1:8083 --rate 3000 --rebase
+   python3 scripts/replay-real-log.py capture.log --port 5514 --collector http://127.0.0.1:8081 --rate 3000 --rebase
    ```
    It reports parsed / rejected / filtered / resolved-user / written / dropped counts and exits non-zero on any problem.
-   `RUST_LOG=debug` on the collector logs why a line was rejected.
+   Set `RUST_LOG=debug` in `kira.env` and restart to log why a line was rejected.
 3. `scripts/e2e-check.py` exercises login, roles, rate limiting and the ingest pipeline end to end; CI runs it against
-   the Docker stack on every push. `KIRA_USER` / `KIRA_PASSWORD` make the older `smoke-test.py`, `verify-samples.py`,
+   the native binaries on every push. `KIRA_USER` / `KIRA_PASSWORD` make the older `smoke-test.py`, `verify-samples.py`,
    `verify-retention.py` and `load-test.py` sign in automatically.
 
 ---
@@ -119,40 +194,39 @@ device uses one that is not recognised, set `DEFAULT_TZ_OFFSET_MINUTES` to that 
 - `web/` — React 19, TypeScript, Tailwind 4, Recharts.
 
 Storage sizing, measured throughput and backup/restore procedures: [docs/capacity-and-storage.md](docs/capacity-and-storage.md).
-Planning notes from earlier work live in `.kilo/plans/`.
 
 ---
 
 ## Configuration
 
-Copy `.env.example`; every variable is documented there. The most important ones:
+All settings live in `kira.env` (copy of `kira.env.example`, every variable is explained there). The important ones:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `POSTGRES_PASSWORD` | `change-me` | Database password — change it |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / generated | First administrator (created only when no users exist) |
-| `AUTH_DISABLED` | `false` | Turns the login off entirely. Never on a reachable host |
-| `COOKIE_SECURE` / `TRUST_PROXY` | `false` | Set both to `true` behind an HTTPS reverse proxy |
-| `SESSION_HOURS` | `12` | Session lifetime |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / — | First administrator, created only when no users exist. Without a password a random one is generated and written once to `.runtime\logs\api.err.log` |
+| `API_ADDR` | `0.0.0.0:8080` | Dashboard address and port |
+| `SYSLOG_UDP_ADDR` / `SYSLOG_TCP_ADDR` | `0.0.0.0:5514` | Syslog listeners |
+| `HEALTH_ADDR` | `0.0.0.0:8081` | Collector `/healthz` and `/metrics` |
 | `DROP_NOISE` | *(empty)* | `conn_start`, `ip_spoof_broadcast`, `dns` (comma separated). Recommended: `conn_start,ip_spoof_broadcast` |
 | `RESOLVE_USERS` / `IP_USER_TTL_MINUTES` | `true` / `240` | IP→user resolution and its window |
 | `RETENTION_HOURS` | `6` | Raw-event window; rollups outlive it |
+| `DEFAULT_TZ_OFFSET_MINUTES` | `0` | Offset for timezone abbreviations the collector does not know (`300` = UTC+5) |
 | `ALLOWED_SOURCES` | *(empty)* | Only accept syslog from these IPs/CIDRs |
 | `TENANT_MAP` | *(empty)* | `CIDR=slug,…` routing to sites |
 | `SMTP_*` | *(empty)* | Report and alert e-mail |
-| `HOST_BIND_IP` | `0.0.0.0` | Set `127.0.0.1` when a reverse proxy fronts the dashboard |
-| `API_PORT` / `SYSLOG_PORT` / `INGEST_HEALTH_PORT` | `8082` / `5514` / `8083` | Published host ports |
+| `COOKIE_SECURE` / `TRUST_PROXY` | `false` | Set both to `true` behind an HTTPS reverse proxy |
+| `AUTH_DISABLED` | `false` | Turns the login off entirely. Never on a reachable host |
 
-Collector tuning (`BATCH_SIZE`, `BATCH_MS`, `QUEUE_CAPACITY`, `DB_POOL_SIZE`, `PARTITIONS_AHEAD_HOURS`,
-`KEEP_EXTENDED_ATTRIBUTES`, `DEFAULT_TZ_OFFSET_MINUTES`) and API tuning (`API_STATEMENT_TIMEOUT_MS`,
-`API_MAX_CONCURRENT_QUERIES`, `RETENTION_ADMIN_TOKEN`) are in `.env.example`.
+Further tuning (`BATCH_SIZE`, `BATCH_MS`, `QUEUE_CAPACITY`, `DB_POOL_SIZE`, `PARTITIONS_AHEAD_HOURS`,
+`KEEP_EXTENDED_ATTRIBUTES`, `API_STATEMENT_TIMEOUT_MS`, `API_MAX_CONCURRENT_QUERIES`, `RETENTION_ADMIN_TOKEN`,
+`SESSION_HOURS`) can be added to `kira.env` the same way.
 
 ### Security notes
 
 - The dashboard and API require login; viewers are read-only and cannot manage users. Put TLS in front
   (Caddy, nginx, Traefik) and set `COOKIE_SECURE=true`. Do not expose the dashboard to the internet.
 - The syslog port has no authentication: restrict it with `ALLOWED_SOURCES` and the host firewall.
-- Run `open-firewall-ports` style scripts only for the profiles you need (Domain/Private), not Public.
+- `kira.ps1 firewall` opens the ports for Domain/Private only; do not open them on the Public profile.
 - The "unidentified" share of traffic depends on Sophos authentication (AD/STAS/captive portal); the IP→user
   resolver only fills gaps from other lines of the same IP.
 
@@ -201,11 +275,11 @@ per-tenant API credentials and row-level authorization before exposing it to cus
 ```bash
 cargo test --workspace --locked          # unit tests; set TEST_DATABASE_URL to also run the Postgres migration test
 npm --prefix web ci && npm --prefix web run typecheck && npm --prefix web run build
-scripts/dev.sh start                      # local stack without Docker
+scripts/dev.sh start                      # Linux/macOS local stack; Windows: scripts\\windows\\kira.ps1
 ```
 
 CI (`.github/workflows/ci.yml`) runs the Rust tests against a Postgres service, the web typecheck/build, the Compose
-config check and an end-to-end job that builds the Docker stack, replays the sanitized capture and runs
+and an end-to-end job that builds the release binaries, starts them against a Postgres service, replays the sanitized capture and runs
 `scripts/e2e-check.py`.
 
 ---
@@ -214,7 +288,7 @@ config check and an end-to-end job that builds the Docker stack, replays the san
 
 | Symptom | Check |
 | --- | --- |
-| Dashboard empty, no errors | `curl :8081/metrics`; `parsed` must increase. Confirm the firewall targets this host's LAN IP on `5514` and *Device standard format*. The collector must listen on `0.0.0.0` (default; check with `ss -lunp | grep 5514`), and the host firewall must allow UDP 5514. |
+| Dashboard empty, no errors | `curl.exe :8081/metrics`; `parsed` must increase. Confirm the firewall targets this host's LAN IP on `5514` and *Device standard format*. The collector must listen on `0.0.0.0` (default; check with `ss -lunp | grep 5514`), and the host firewall must allow UDP 5514. |
 | Dashboard shows demo values | Synthetic seed data was loaded. Run `scripts/reset-data.sh` (or `--demo-only`) and let real logs refill. |
 | `rejected` counter rising | Another syslog source shares the port, or the payload is Sophos UTM/Cyberoam legacy format (not supported yet). `RUST_LOG=debug` samples rejected lines. |
 | Users show “unidentified” | Authentication/SSO must be active and the rule logging usernames; web-filter logs include `user_name` only then. |
@@ -241,6 +315,6 @@ Next, in priority order:
 2. **Site Clean and browse time**: filter ads/CDN/telemetry/background requests, estimate time spent per site.
 3. **Report data**: department report (uses `user_department_map`), search terms and YouTube titles (needs SSL/TLS
    inspection on the firewall), safeguarding report, productivity categories.
-4. **Delivery**: report templates as files, alert throttling, Zulip-formatted alert payloads.
-5. **Operations**: Windows service wrapper, automated backups, `/metrics` in Prometheus format, ClickHouse option for
+4. **Delivery**: custom/scheduled report SQL currently ignores the user/category/action filters (they are read but not applied); report templates as files, alert throttling, Zulip-formatted alert payloads.
+5. **Operations**: run as a real Windows service, automated backups, `/metrics` in Prometheus format, ClickHouse option for
    very high volumes, spill-to-disk queue so a database outage loses nothing.
