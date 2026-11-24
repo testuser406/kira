@@ -17,6 +17,9 @@ import time
 import urllib.request
 
 
+import sys as _sys, pathlib as _pl
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent))
+import _kira_auth  # noqa: E402,F401  (auto sign-in via KIRA_USER/KIRA_PASSWORD)
 def get_json(url: str, timeout: int = 10):
     with urllib.request.urlopen(url, timeout=timeout) as resp:
         return json.load(resp)

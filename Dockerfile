@@ -26,6 +26,6 @@ COPY --from=web /app/web/dist /app/web/dist
 
 ENV WEB_DIR=/app/web/dist
 USER sfos
-EXPOSE 8080 514/tcp 514/udp 8081
+EXPOSE 8080 5514/tcp 5514/udp 8081
 
 CMD ["sfos-api"]

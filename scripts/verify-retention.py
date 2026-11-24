@@ -10,6 +10,9 @@ import urllib.error
 import urllib.request
 
 
+import sys as _sys, pathlib as _pl
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent))
+import _kira_auth  # noqa: E402,F401  (auto sign-in via KIRA_USER/KIRA_PASSWORD)
 def request_json(url: str, token: str | None = None, body: dict | None = None) -> dict:
     headers = {"Accept": "application/json"}
     data = None
