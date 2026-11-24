@@ -122,21 +122,23 @@ jobs:
       - name: Build
         shell: pwsh
         run: .\scripts\windows\kira.ps1 build
-      - name: Init and start
+      # The runner ends a step's background processes when the step finishes, so start, test and stop
+      # have to happen inside one step.
+      - name: Init, start, run checks, stop
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           .\scripts\windows\kira.ps1 init
           .\scripts\windows\kira.ps1 start
           .\scripts\windows\kira.ps1 status
-      - name: Replay sanitized capture
-        run: python scripts/replay-real-log.py fw1_samples.log --port 5514 --collector http://127.0.0.1:8081 --rebase
-      - name: Auth, pipeline and report checks
-        run: python scripts/e2e-check.py --api http://127.0.0.1:8080 --collector http://127.0.0.1:8081 --syslog 127.0.0.1:5514 --user admin --password ci-admin-password-123 --drop-noise conn_start,ip_spoof_broadcast
-      - name: Stop
-        if: always()
-        shell: pwsh
-        run: |
-          .\scripts\windows\kira.ps1 stop
+          try {
+            python scripts/replay-real-log.py fw1_samples.log --port 5514 --collector http://127.0.0.1:8081 --rebase
+            if ($LASTEXITCODE -ne 0) { throw 'replay failed' }
+            python scripts/e2e-check.py --api http://127.0.0.1:8080 --collector http://127.0.0.1:8081 --syslog 127.0.0.1:5514 --user admin --password ci-admin-password-123 --drop-noise conn_start,ip_spoof_broadcast
+            if ($LASTEXITCODE -ne 0) { throw 'e2e checks failed' }
+          } finally {
+            .\scripts\windows\kira.ps1 stop
+          }
       - name: Logs on failure
         if: failure()
         shell: pwsh
