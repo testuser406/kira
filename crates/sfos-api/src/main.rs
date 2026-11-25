@@ -1,5 +1,6 @@
 mod api;
 mod auth;
+mod live;
 mod query;
 mod report;
 
@@ -190,6 +191,7 @@ async fn main() -> Result<()> {
         .route("/api/v1/overview", get(api::overview))
         .route("/api/v1/top", get(api::top))
         .route("/api/v1/dashboard/live", get(api::live_dashboards))
+        .route("/api/v1/live/{kind}", get(live::live))
         .route("/api/v1/events", get(api::events))
         .route("/api/v1/events/export", get(api::events_export))
         .route(

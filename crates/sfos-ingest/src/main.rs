@@ -169,6 +169,9 @@ async fn maintenance(
         if let Err(err) = store.drop_old_device_activity().await {
             tracing::error!(%err, "failed to prune device activity");
         }
+        if let Err(err) = store.drop_old_minute_rollups().await {
+            tracing::error!(%err, "failed to prune minute rollups");
+        }
     }
 }
 

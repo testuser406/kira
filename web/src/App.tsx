@@ -8,12 +8,11 @@ import { KpiCards } from "./components/KpiCards";
 import { CollectorPanel, SecurityPanel } from "./components/SidePanels";
 import { TopPanel } from "./components/TopPanel";
 import { TrafficChart, type TrafficMode } from "./components/TrafficChart";
-import { LiveDashboardsView } from "./components/LiveDashboards";
+import { LiveMinuteView, type LiveKind } from "./components/LiveMinute";
 import AlertRulesManager from "./components/AlertRulesManager";
 import ReportSchedulesManager from "./components/ReportSchedulesManager";
 import CustomReportsManager from "./components/CustomReportsManager";
 import { Card, Skeleton, Spinner } from "./components/ui";
-import type { LiveDashboards } from "./types";
 
 const RANGES = [
   { id: "1h", label: "1h", hours: 1 },
@@ -60,7 +59,6 @@ export default function App() {
 
   const [meta, setMeta] = useState<Meta | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [liveData, setLiveData] = useState<LiveDashboards | null>(null);
   const [view, setView] = useState<View>("overview");
   const [tops, setTops] = useState<Tops>(EMPTY_TOPS);
   const [events, setEvents] = useState<EventRow[]>([]);
@@ -126,7 +124,6 @@ export default function App() {
         const destinations = await api.top(tenant, range, "destinations", 8, controller.signal);
         const categories = await api.top(tenant, range, "categories", 8, controller.signal);
         const threats = await api.top(tenant, range, "threats", 5, controller.signal);
-        const nextLive = await api.liveDashboards(tenant, range, controller.signal);
         const nextEvents = await api.events(
           tenant,
           range,
@@ -143,7 +140,6 @@ export default function App() {
         );
         if (controller.signal.aborted) return;
         setOverview(nextOverview);
-        setLiveData(nextLive);
         setTops({
           users: users.rows,
           destinations: destinations.rows,
@@ -316,7 +312,7 @@ export default function App() {
         <KpiCards totals={overview?.totals ?? null} loading={!hasData} />
 
         {view !== "overview" ? (
-          <LiveDashboardsView data={liveData} loading={refreshing} spanHours={spanHours} />
+          <LiveMinuteView kind={view as LiveKind} tenant={tenant} />
         ) : !hasData ? (
           <DashboardSkeleton />
         ) : waitingForLogs && !meta?.last_event_at ? (

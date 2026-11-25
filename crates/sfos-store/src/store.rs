@@ -65,6 +65,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0016_custom_report_cron",
         include_str!("../migrations/0016_custom_report_cron.sql"),
     ),
+    (
+        "0017_minute_rollups",
+        include_str!("../migrations/0017_minute_rollups.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -457,6 +461,7 @@ impl Store {
         )
         .await?;
         tx.execute(Self::ROLLUP_BATCH_SQL, &[]).await?;
+        tx.execute(Self::MINUTE_ROLLUP_BATCH_SQL, &[]).await?;
         tx.execute(Self::DEVICE_ACTIVITY_BATCH_SQL, &[]).await?;
         tx.commit().await?;
         tracing::debug!(
@@ -539,6 +544,46 @@ impl Store {
         threats = event_rollups.threats + EXCLUDED.threats,
         bytes_up = event_rollups.bytes_up + EXCLUDED.bytes_up,
         bytes_down = event_rollups.bytes_down + EXCLUDED.bytes_down
+    "#;
+
+    const MINUTE_ROLLUP_BATCH_SQL: &str = r#"
+    INSERT INTO minute_rollups (
+        tenant_id, bucket, dimension, key, events, allowed, blocked, bytes_up, bytes_down
+    )
+    SELECT e.tenant_id,
+           date_trunc('minute', e.ts) AS bucket,
+           d.dimension,
+           d.key,
+           count(*)::bigint,
+           count(*) FILTER (WHERE e.action = 'allowed')::bigint,
+           count(*) FILTER (WHERE e.action = 'blocked')::bigint,
+           COALESCE(sum(e.sent_bytes), 0)::bigint,
+           COALESCE(sum(e.recv_bytes), 0)::bigint
+    FROM event_batch e
+    CROSS JOIN LATERAL (
+        VALUES
+            ('overview', ''),
+            ('group', e.category_group),
+            ('users', COALESCE(NULLIF(e.user_name, ''), host(e.src_ip))),
+            ('applications', NULLIF(e.application, '')),
+            ('categories', CASE WHEN e.category_group = 'web' THEN NULLIF(e.category, '') END),
+            ('domains', CASE WHEN e.category_group = 'web' THEN NULLIF(e.domain, '') END),
+            ('threats', CASE WHEN e.category_group = 'threat'
+                THEN COALESCE(NULLIF(e.threat_name, ''), NULLIF(e.reason, '')) END),
+            ('threat_sources', CASE WHEN e.category_group = 'threat' THEN host(e.src_ip) END),
+            ('vpn_tunnels', CASE WHEN e.category_group = 'vpn'
+                THEN COALESCE(NULLIF(e.vpn_tunnel, ''), 'unknown') END),
+            ('vpn_users', CASE WHEN e.category_group = 'vpn'
+                THEN COALESCE(NULLIF(e.vpn_user, ''), 'unknown') END)
+    ) AS d(dimension, key)
+    WHERE d.key IS NOT NULL AND COALESCE(e.con_event, '') <> 'Start'
+    GROUP BY e.tenant_id, 2, d.dimension, d.key
+    ON CONFLICT (tenant_id, bucket, dimension, key) DO UPDATE SET
+        events = minute_rollups.events + EXCLUDED.events,
+        allowed = minute_rollups.allowed + EXCLUDED.allowed,
+        blocked = minute_rollups.blocked + EXCLUDED.blocked,
+        bytes_up = minute_rollups.bytes_up + EXCLUDED.bytes_up,
+        bytes_down = minute_rollups.bytes_down + EXCLUDED.bytes_down
     "#;
 
     const DEVICE_ACTIVITY_BATCH_SQL: &str = r#"
@@ -669,6 +714,16 @@ impl Store {
             dropped += 1;
         }
         Ok(dropped)
+    }
+
+    pub async fn drop_old_minute_rollups(&self) -> Result<u64> {
+        let client = self.pool.get().await?;
+        Ok(client
+            .execute(
+                "DELETE FROM minute_rollups WHERE bucket < now() - interval '7 days'",
+                &[],
+            )
+            .await?)
     }
 
     pub async fn drop_old_device_activity(&self) -> Result<u64> {

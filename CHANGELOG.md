@@ -6,6 +6,17 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.3.0]
+
+### Added
+- Per-minute rollups (`minute_rollups`, kept 7 days), maintained in the same transaction as event writes.
+- `GET /api/v1/live/{bandwidth|productivity|security|vpn}?window=5..1440` minute-resolution API.
+- Live tabs rebuilt: each shows its own data (bandwidth rate/peak/top users+apps, web requests/categories/sites,
+  threat events/top threats+sources, active VPN tunnels/users/traffic), 5m/15m/1h/6h window, 15s refresh.
+
+### Changed
+- Live tabs no longer run the heavy raw-events dashboard query; tab refresh pauses while the page is hidden.
+
 ## [0.2.0]
 
 ### Added

@@ -42,7 +42,7 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    fn bad_request(msg: impl Into<String>) -> Self {
+    pub(crate) fn bad_request(msg: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: msg.into(),
@@ -126,7 +126,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-fn acquire_query_permit(
+pub(crate) fn acquire_query_permit(
     query_semaphore: &Arc<Semaphore>,
     busy_message: &'static str,
 ) -> Result<OwnedSemaphorePermit, ApiError> {
@@ -155,7 +155,10 @@ impl From<&Tenant> for TenantView {
     }
 }
 
-async fn resolve_tenant(state: &AppState, slug: Option<&str>) -> Result<Tenant, ApiError> {
+pub(crate) async fn resolve_tenant(
+    state: &AppState,
+    slug: Option<&str>,
+) -> Result<Tenant, ApiError> {
     if let Some(slug) = slug {
         return state
             .store

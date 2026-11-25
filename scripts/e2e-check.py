@@ -164,6 +164,16 @@ def main():
     if cid:
         check("custom report runs", admin.call("POST", f"/api/v1/reports/custom/{cid}/run")[0] == 200)
 
+    # ---- per-minute live dashboards (each tab has its own data)
+    shapes = {"bandwidth": "top_users", "productivity": "top_domains", "security": "top_threats", "vpn": "tunnels"}
+    for kind, field in shapes.items():
+        st, body = admin.call("GET", f"/api/v1/live/{kind}?window=15")
+        dat = (body or {}).get("data", {}) if st == 200 else {}
+        check(f"live/{kind} responds with minute series", st == 200 and len(dat.get("series", [])) == 15 and field in dat, f"{st}")
+    st, bw = admin.call("GET", "/api/v1/live/bandwidth?window=15")
+    check("live bandwidth sees ingested traffic", st == 200 and (bw["data"]["total_up"] + bw["data"]["total_down"]) > 0)
+    check("unknown live tab rejected", admin.call("GET", "/api/v1/live/nope")[0] == 400)
+
     # ---- rate limiting last (it would lock this IP out)
     if not a.skip_ratelimit:
         t = Client(a.api)
