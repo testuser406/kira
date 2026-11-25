@@ -274,6 +274,12 @@ async fn main() -> Result<()> {
         )
         .route("/api/v1/users/{id}", delete(auth::delete_user))
         .route("/api/v1/users/{id}/password", put(auth::reset_password))
+        .route(
+            "/api/{*rest}",
+            axum::routing::any(|| async {
+                (axum::http::StatusCode::NOT_FOUND, "unknown api route")
+            }),
+        )
         .fallback_service(static_files)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

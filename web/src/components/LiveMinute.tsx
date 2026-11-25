@@ -123,6 +123,8 @@ export function LiveMinuteView({ kind, tenant }: { kind: LiveKind; tenant: strin
         const qs = new URLSearchParams({ tenant, window: String(windowMin) });
         const res = await fetch(`/api/v1/live/${kind}?${qs}`, { signal: ctl.signal, credentials: "same-origin" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!(res.headers.get("content-type") ?? "").includes("json"))
+          throw new Error("API is outdated - stop, rebuild and start Kira (kira.ps1 stop; kira.ps1 build; kira.ps1 start)");
         const body = await res.json();
         if (!stop) {
           setData(body.data as Data);

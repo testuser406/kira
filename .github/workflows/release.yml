@@ -90,5 +90,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "v${{ needs.detect.outputs.version }}"
-          $pre = if ($tag -match '-') { '--prerelease' } else { '' }
-          gh release create $tag $env:ZIP --target "${{ github.sha }}" --title "Kira $tag" --notes-file notes.md $pre
+          $extra = @(); if ($tag -match '-') { $extra += '--prerelease' }
+          gh release create $tag $env:ZIP --target "${{ github.sha }}" --title "Kira $tag" --notes-file notes.md @extra

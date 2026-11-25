@@ -14,6 +14,10 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 - Live tabs rebuilt: each shows its own data (bandwidth rate/peak/top users+apps, web requests/categories/sites,
   threat events/top threats+sources, active VPN tunnels/users/traffic), 5m/15m/1h/6h window, 15s refresh.
 
+### Fixed
+- Unknown `/api/*` routes now return 404 instead of the dashboard HTML; live tabs explain when the API is outdated.
+- Release workflow no longer passes an empty argument to `gh release create`.
+
 ### Changed
 - Live tabs no longer run the heavy raw-events dashboard query; tab refresh pauses while the page is hidden.
 
