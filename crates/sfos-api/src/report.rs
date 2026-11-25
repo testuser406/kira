@@ -141,7 +141,7 @@ const GENERIC_SQL: &str = "SELECT ts, log_type, log_component, category_group, a
              ) e
              WHERE tenant_id = $1 AND ts >= $2 AND ts < $3
              ORDER BY ts ASC
-             LIMIT 100000";
+             LIMIT 5000";
 
 enum Param {
     Text(String),
@@ -456,7 +456,7 @@ const PDF_PREFERRED: [&str; 9] = [
     "events",
 ];
 
-fn pdf_text(s: &str, max: usize) -> String {
+pub(crate) fn pdf_text(s: &str, max: usize) -> String {
     let mut out = String::new();
     for ch in s.chars().take(max) {
         out.push(match ch {

@@ -65,6 +65,9 @@ async fn main() -> Result<()> {
         .await
         .context("failed to create event partitions")?;
     store.drop_old_partitions(retention_hours).await?;
+    if let Err(err) = store.roll_hourly(144).await {
+        tracing::warn!(%err, "initial hourly rollup failed");
+    }
 
     let metrics: SharedMetrics = Arc::new(Metrics::default());
     let (tx, rx) = mpsc::channel(cfg.queue_capacity);
@@ -171,6 +174,12 @@ async fn maintenance(
         }
         if let Err(err) = store.drop_old_minute_rollups().await {
             tracing::error!(%err, "failed to prune minute rollups");
+        }
+        if let Err(err) = store.roll_hourly(48).await {
+            tracing::error!(%err, "failed to roll up hourly activity");
+        }
+        if let Err(err) = store.drop_old_hourly().await {
+            tracing::error!(%err, "failed to prune hourly activity");
         }
     }
 }

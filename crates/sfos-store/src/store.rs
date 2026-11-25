@@ -73,6 +73,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0018_productivity_siteclean",
         include_str!("../migrations/0018_productivity_siteclean.sql"),
     ),
+    (
+        "0019_hourly_activity",
+        include_str!("../migrations/0019_hourly_activity.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -580,6 +584,15 @@ impl Store {
                 THEN sfos_site(e.domain) END),
             ('web_users', CASE WHEN e.category_group = 'web'
                 THEN COALESCE(NULLIF(e.user_name, ''), host(e.src_ip)) END),
+            ('user_sites', CASE WHEN e.category_group = 'web' AND NOT sfos_is_noise_site(sfos_site(e.domain))
+                AND sfos_site(e.domain) IS NOT NULL
+                THEN COALESCE(NULLIF(e.user_name, ''), host(e.src_ip)) || E'\t' || sfos_site(e.domain) END),
+            ('user_categories', CASE WHEN e.category_group = 'web' AND NULLIF(e.category, '') IS NOT NULL
+                THEN COALESCE(NULLIF(e.user_name, ''), host(e.src_ip)) || E'\t' || e.category END),
+            ('policies', NULLIF(e.fw_rule_name, '')),
+            ('countries', NULLIF(e.dst_country, '')),
+            ('subnets', CASE WHEN e.src_ip IS NOT NULL AND family(e.src_ip) = 4
+                THEN host(network(set_masklen(e.src_ip, 24))) || '/24' END),
             ('threats', CASE WHEN e.category_group = 'threat'
                 THEN COALESCE(NULLIF(e.threat_name, ''), NULLIF(e.reason, '')) END),
             ('threat_sources', CASE WHEN e.category_group = 'threat' THEN host(e.src_ip) END),
@@ -732,7 +745,32 @@ impl Store {
         let client = self.pool.get().await?;
         Ok(client
             .execute(
-                "DELETE FROM minute_rollups WHERE bucket < now() - interval '7 days'",
+                "DELETE FROM minute_rollups
+                 WHERE bucket < now() - interval '7 days'
+                    OR (dimension IN ('user_sites', 'user_categories')
+                        AND bucket < now() - interval '3 days')",
+                &[],
+            )
+            .await?)
+    }
+
+    /// Recompute the last `hours` hours of hourly activity from minute rollups.
+    pub async fn roll_hourly(&self, hours: i64) -> Result<i64> {
+        let client = self.pool.get().await?;
+        let row = client
+            .query_one(
+                "SELECT sfos_roll_hours(now() - make_interval(hours => $1::int), now() + interval '1 minute')",
+                &[&(hours.clamp(1, 144) as i32)],
+            )
+            .await?;
+        Ok(row.get(0))
+    }
+
+    pub async fn drop_old_hourly(&self) -> Result<u64> {
+        let client = self.pool.get().await?;
+        Ok(client
+            .execute(
+                "DELETE FROM hourly_activity WHERE hour < now() - interval '400 days'",
                 &[],
             )
             .await?)

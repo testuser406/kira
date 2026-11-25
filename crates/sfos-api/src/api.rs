@@ -83,7 +83,7 @@ impl ApiError {
             }
         }
     }
-    fn internal(err: anyhow::Error) -> Self {
+    pub(crate) fn internal(err: anyhow::Error) -> Self {
         tracing::error!(%err, "api request failed");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -2481,16 +2481,37 @@ pub async fn generate_report_on_demand(
         .unwrap_or("generic")
         .to_string();
     let client = state.store.pool().get().await?;
-    let table =
-        crate::report::run(&client, tenant.id, range.from, range.to, &subtype, &filters).await?;
-    let (content, content_type, extension) = crate::report::render(
-        &format,
-        &subtype.replace('_', " "),
-        &tenant.name,
-        now,
-        &table,
-    )
-    .map_err(ApiError::bad_request)?;
+    let (content, content_type, extension) = if crate::summary::supports(&subtype) {
+        let user = filters
+            .get("user")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let top = filters.get("top").and_then(|v| v.as_i64()).unwrap_or(15);
+        let summary = crate::summary::build(
+            &client,
+            tenant.id,
+            &tenant.name,
+            &subtype,
+            range.from,
+            range.to,
+            user,
+            top,
+        )
+        .await?;
+        crate::summary::render(&format, &summary).map_err(ApiError::bad_request)?
+    } else {
+        let table =
+            crate::report::run(&client, tenant.id, range.from, range.to, &subtype, &filters)
+                .await?;
+        crate::report::render(
+            &format,
+            &subtype.replace('_', " "),
+            &tenant.name,
+            now,
+            &table,
+        )
+        .map_err(ApiError::bad_request)?
+    };
 
     let file_name = format!("kira-report-{}.{}", now.format("%Y%m%dT%H%M%SZ"), extension);
 
@@ -2546,24 +2567,48 @@ pub async fn generate_and_send_report(
         })
         .unwrap_or_else(|| "generic".to_string());
     let client = state.store.pool().get().await?;
-    let table = crate::report::run(
-        &client,
-        tenant.id,
-        range.from,
-        range.to,
-        &report_subtype,
-        filters,
-    )
-    .await?;
-    let row_count = table.rows.len() as i64;
-    let (content, _content_type, extension) = crate::report::render(
-        &schedule.format,
-        &format!("{} ({})", schedule.name, report_subtype.replace('_', " ")),
-        &tenant.name,
-        now,
-        &table,
-    )
-    .map_err(ApiError::bad_request)?;
+    let (row_count, content, extension) = if crate::summary::supports(&report_subtype) {
+        let user = filters
+            .get("user")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let top = filters.get("top").and_then(|v| v.as_i64()).unwrap_or(15);
+        let summary = crate::summary::build(
+            &client,
+            tenant.id,
+            &tenant.name,
+            &report_subtype,
+            range.from,
+            range.to,
+            user,
+            top,
+        )
+        .await?;
+        let rows = crate::summary::row_count(&summary);
+        let (content, _ct, extension) =
+            crate::summary::render(&schedule.format, &summary).map_err(ApiError::bad_request)?;
+        (rows, content, extension)
+    } else {
+        let table = crate::report::run(
+            &client,
+            tenant.id,
+            range.from,
+            range.to,
+            &report_subtype,
+            filters,
+        )
+        .await?;
+        let rows = table.rows.len() as i64;
+        let (content, _ct, extension) = crate::report::render(
+            &schedule.format,
+            &format!("{} ({})", schedule.name, report_subtype.replace('_', " ")),
+            &tenant.name,
+            now,
+            &table,
+        )
+        .map_err(ApiError::bad_request)?;
+        (rows, content, extension)
+    };
 
     // Store report result
     let file_name = format!(

@@ -6,6 +6,21 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.5.0]
+
+### Added
+- Summary reports built from long-term hourly rollups (`hourly_activity`, kept 400 days) instead of raw logs:
+  executive summary, online productivity, user overview (per-user drill-down), users, allowed/blocked
+  websites, security & threats, bandwidth, VPN, firewall policy, subnets, activity timeline.
+- Each report has KPIs, trend chart and top-N tables (Top N 10-100). Export to a compact PDF (charts, data bars,
+  typically 2-5 pages) or a sectioned CSV; `GET /api/v1/reports/summary`.
+- New Reports tab in the dashboard with period (24h-90d), report type, user and Top N selectors.
+- Minute rollups gained user-site, user-category, policy, country and subnet dimensions.
+
+### Changed
+- On-demand and scheduled reports of these types now use the summary engine (small files, any period up to 366 days).
+- Raw detail reports are capped at 5,000 rows (was 100,000).
+
 ## [0.4.0]
 
 ### Added

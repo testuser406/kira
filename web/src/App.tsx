@@ -9,6 +9,7 @@ import { CollectorPanel, SecurityPanel } from "./components/SidePanels";
 import { TopPanel } from "./components/TopPanel";
 import { TrafficChart, type TrafficMode } from "./components/TrafficChart";
 import { LiveMinuteView, type LiveKind } from "./components/LiveMinute";
+import { ReportsPage } from "./components/ReportsPage";
 import { ProductivityPage } from "./components/ProductivityPage";
 import AlertRulesManager from "./components/AlertRulesManager";
 import ReportSchedulesManager from "./components/ReportSchedulesManager";
@@ -23,7 +24,7 @@ const RANGES = [
   { id: "30d", label: "30d", hours: 720 },
 ] as const;
 
-type View = "overview" | "productivity_report" | "bandwidth" | "productivity" | "security" | "vpn";
+type View = "overview" | "summary_reports" | "productivity_report" | "bandwidth" | "productivity" | "security" | "vpn";
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -32,6 +33,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "security", label: "Live Security" },
   { id: "vpn", label: "Live VPN" },
   { id: "productivity_report", label: "Productivity" },
+  { id: "summary_reports", label: "Reports" },
 ];
 
 type Tops = {
@@ -313,7 +315,9 @@ export default function App() {
 
         <KpiCards totals={overview?.totals ?? null} loading={!hasData} />
 
-        {view === "productivity_report" ? (
+        {view === "summary_reports" ? (
+          <ReportsPage tenant={tenant} />
+        ) : view === "productivity_report" ? (
           <ProductivityPage tenant={tenant} />
         ) : view !== "overview" ? (
           <LiveMinuteView kind={view as LiveKind} tenant={tenant} />

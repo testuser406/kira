@@ -185,6 +185,22 @@ def main():
     st, _ = admin.call("DELETE", "/api/v1/productivity/guidelines?kind=site&key=e2e-test.example")
     check("admin can delete a guideline", st == 200)
 
+    # ---- summary reports (rollup based, concise)
+    for rt in ("executive", "online_productivity", "user", "websites_allowed_blocked", "activity_timeline",
+               "firewall_policy", "security_threat", "network_bandwidth", "vpn_connections", "subnet"):
+        st, body = admin.call("GET", f"/api/v1/reports/summary?type={rt}&from=24h")
+        check(f"summary {rt} builds", st == 200 and body.get("kpis") is not None and len(body.get("sections", [])) >= 1, f"{st} {str(body)[:120]}")
+    st, ex = admin.call("GET", "/api/v1/reports/summary?type=executive&from=1h")
+    ev = next((k["value"] for k in ex.get("kpis", []) if k["label"] == "Total events"), 0) if st == 200 else 0
+    check("executive summary counts ingested events", ev > 0, f"events={ev}")
+    st, pdf = admin.raw("GET", "/api/v1/reports/summary?type=executive&from=24h&format=pdf")
+    check("summary PDF is a small valid PDF", st == 200 and pdf.startswith(b"%PDF") and len(pdf) < 200_000, f"{st} {len(pdf)}")
+    st, csv_ = admin.raw("GET", "/api/v1/reports/summary?type=online_productivity&from=24h&format=csv")
+    check("summary CSV has titled sections", st == 200 and b"Productivity split" in csv_, f"{st}")
+    check("user overview needs a user", admin.call("GET", "/api/v1/reports/summary?type=user_overview")[0] == 400)
+    check("user overview works for a user", admin.call("GET", "/api/v1/reports/summary?type=user_overview&user=nobody-e2e")[0] == 200)
+    check("unknown summary type rejected", admin.call("GET", "/api/v1/reports/summary?type=bogus")[0] == 400)
+
     # ---- rate limiting last (it would lock this IP out)
     if not a.skip_ratelimit:
         t = Client(a.api)
