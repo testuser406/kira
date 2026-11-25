@@ -444,7 +444,7 @@ impl Store {
         }
         let mut client = self.pool.get().await?;
         let starts = std::time::Instant::now();
-        let tx = client.transaction().await?;
+        let mut tx = client.transaction().await?;
         tx.batch_execute(&format!(
             "CREATE TEMP TABLE event_batch ON COMMIT DROP AS
              SELECT {} FROM events WITH NO DATA",
@@ -473,7 +473,17 @@ impl Store {
         )
         .await?;
         tx.execute(Self::ROLLUP_BATCH_SQL, &[]).await?;
-        tx.execute(Self::MINUTE_ROLLUP_BATCH_SQL, &[]).await?;
+        // Live/report rollups must never cost us the raw events: isolate them in a savepoint.
+        {
+            let sp = tx.transaction().await?;
+            match sp.execute(Self::MINUTE_ROLLUP_BATCH_SQL, &[]).await {
+                Ok(_) => sp.commit().await?,
+                Err(err) => {
+                    tracing::error!(%err, "minute rollup failed; events kept, live/report data skipped for this batch");
+                    sp.rollback().await?;
+                }
+            }
+        }
         tx.execute(Self::DEVICE_ACTIVITY_BATCH_SQL, &[]).await?;
         tx.commit().await?;
         tracing::debug!(

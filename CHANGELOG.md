@@ -6,6 +6,11 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.5.2]
+
+### Fixed
+- A failing live/report rollup can no longer cause raw events to be dropped: rollups run in a savepoint and errors are logged without losing the batch.
+
 ## [0.5.1]
 
 ### Added
