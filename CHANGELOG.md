@@ -6,6 +6,13 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.5.1]
+
+### Added
+- Allowed and Blocked columns next to requests in top sites, users by browse time, categories, applications and users tables.
+- KPI cards show the change versus the previous period of equal length (dashboard and PDF).
+- Reports tab: custom date range, sortable columns, filter box, "show all", and click a user to open their User overview.
+
 ## [0.5.0]
 
 ### Added

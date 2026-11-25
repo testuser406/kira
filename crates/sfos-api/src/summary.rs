@@ -31,6 +31,9 @@ pub struct Kpi {
     pub label: String,
     pub value: f64,
     pub unit: &'static str, // count | bytes | minutes | percent
+    /// Change versus the previous period of equal length (percent; points for percent KPIs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta: Option<f64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -372,6 +375,7 @@ fn kpi(label: &str, value: i64, unit: &'static str) -> Kpi {
         label: label.to_string(),
         value: value as f64,
         unit,
+        delta: None,
     }
 }
 
@@ -384,7 +388,7 @@ fn productive_pct(split: &Section) -> f64 {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn build(
+async fn build_one(
     client: &tokio_postgres::Client,
     tenant: Uuid,
     tenant_name: &str,
@@ -436,6 +440,7 @@ pub async fn build(
                     label: "Productive share".into(),
                     value: productive_pct(&split),
                     unit: "percent",
+                    delta: None,
                 },
             ]);
             let s = ctx.series("overview", "").await?;
@@ -453,7 +458,7 @@ pub async fn build(
                 "User",
                 &ctx.top_n("web_users", false, "minutes", top).await?,
                 &t,
-                &["minutes", "events"],
+                &["minutes", "events", "allowed", "blocked"],
             ));
             let t = ctx.total("sites", None).await?;
             sections.push(ranked(
@@ -461,7 +466,7 @@ pub async fn build(
                 "Site",
                 &ctx.top_n("sites", false, "minutes", top).await?,
                 &t,
-                &["minutes", "events", "bytes"],
+                &["minutes", "events", "allowed", "blocked", "bytes"],
             ));
             let t = ctx.total("categories", None).await?;
             sections.push(ranked(
@@ -469,7 +474,7 @@ pub async fn build(
                 "Category",
                 &ctx.top_n("categories", false, "events", top).await?,
                 &t,
-                &["events", "share"],
+                &["events", "allowed", "blocked", "share"],
             ));
             let t = ctx.total("threats", None).await?;
             sections.push(ranked(
@@ -485,7 +490,7 @@ pub async fn build(
                 "Application",
                 &ctx.top_n("applications", false, "bytes", top).await?,
                 &t,
-                &["bytes", "events"],
+                &["bytes", "events", "allowed", "blocked"],
             ));
         }
         "online_productivity" => {
@@ -498,6 +503,7 @@ pub async fn build(
                     label: "Productive share".into(),
                     value: productive_pct(&split),
                     unit: "percent",
+                    delta: None,
                 },
                 kpi("Blocked by web filter", web.blocked, "count"),
             ]);
@@ -516,7 +522,7 @@ pub async fn build(
                 "User",
                 &ctx.top_n("web_users", false, "minutes", top).await?,
                 &t,
-                &["minutes", "events"],
+                &["minutes", "events", "allowed", "blocked"],
             ));
             let t = ctx.total("sites", None).await?;
             sections.push(ranked(
@@ -524,7 +530,7 @@ pub async fn build(
                 "Site",
                 &ctx.top_n("sites", false, "minutes", top).await?,
                 &t,
-                &["minutes", "events", "bytes"],
+                &["minutes", "events", "allowed", "blocked", "bytes"],
             ));
             let t = ctx.total("categories", None).await?;
             sections.push(ranked(
@@ -532,7 +538,7 @@ pub async fn build(
                 "Category",
                 &ctx.top_n("categories", false, "events", top).await?,
                 &t,
-                &["events", "blocked", "share"],
+                &["events", "allowed", "blocked", "share"],
             ));
         }
         "user" => {
@@ -549,7 +555,7 @@ pub async fn build(
                 "User",
                 &ctx.top_n("users", false, "bytes", top).await?,
                 &t,
-                &["bytes", "events", "blocked", "share"],
+                &["bytes", "events", "allowed", "blocked", "share"],
             ));
             let t = ctx.total("web_users", None).await?;
             sections.push(ranked(
@@ -557,7 +563,7 @@ pub async fn build(
                 "User",
                 &ctx.top_n("web_users", false, "minutes", top).await?,
                 &t,
-                &["minutes", "events"],
+                &["minutes", "events", "allowed", "blocked"],
             ));
         }
         "user_overview" => {
@@ -575,6 +581,7 @@ pub async fn build(
                     label: "Productive share".into(),
                     value: productive_pct(&split),
                     unit: "percent",
+                    delta: None,
                 },
             ]);
             let s = ctx.series("users", &u).await?;
@@ -588,14 +595,14 @@ pub async fn build(
                 "Site",
                 &ctx.top_n("user_sites", true, "minutes", top).await?,
                 &st,
-                &["minutes", "events", "bytes"],
+                &["minutes", "events", "allowed", "blocked", "bytes"],
             ));
             sections.push(ranked(
                 "Top categories",
                 "Category",
                 &ctx.top_n("user_categories", true, "events", top).await?,
                 &st,
-                &["events", "blocked"],
+                &["events", "allowed", "blocked"],
             ));
         }
         "websites_allowed_blocked" => {
@@ -781,7 +788,7 @@ pub async fn build(
                 "Subnet",
                 &ctx.top_n("subnets", false, "bytes", top).await?,
                 &t,
-                &["bytes", "events", "blocked"],
+                &["bytes", "events", "allowed", "blocked"],
             ));
         }
         other => {
@@ -812,6 +819,58 @@ pub async fn build(
         kpis,
         sections,
     })
+}
+
+/// Build a report and annotate KPIs with the change versus the previous period.
+#[allow(clippy::too_many_arguments)]
+pub async fn build(
+    client: &tokio_postgres::Client,
+    tenant: Uuid,
+    tenant_name: &str,
+    report_type: &str,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    user: Option<String>,
+    top: i64,
+) -> Result<Summary, ApiError> {
+    let mut cur = build_one(
+        client,
+        tenant,
+        tenant_name,
+        report_type,
+        from,
+        to,
+        user.clone(),
+        top,
+    )
+    .await?;
+    let span = to - from;
+    if span > Duration::zero() {
+        if let Ok(prev) = build_one(
+            client,
+            tenant,
+            tenant_name,
+            report_type,
+            from - span,
+            from,
+            user,
+            5,
+        )
+        .await
+        {
+            for k in &mut cur.kpis {
+                if let Some(p) = prev.kpis.iter().find(|p| p.label == k.label) {
+                    k.delta = if k.unit == "percent" {
+                        (p.value > 0.0).then(|| ((k.value - p.value) * 10.0).round() / 10.0)
+                    } else {
+                        (p.value > 0.0)
+                            .then(|| (((k.value - p.value) / p.value) * 1000.0).round() / 10.0)
+                    };
+                }
+            }
+        }
+    }
+    Ok(cur)
 }
 
 pub fn row_count(s: &Summary) -> i64 {
@@ -1004,6 +1063,21 @@ fn pdf_kpis(p: &mut Pdf, kpis: &[Kpi]) {
             p.rect(x, top - 42.0, w, 42.0, (0.95, 0.96, 0.98));
             p.rect(x, top - 42.0, 3.0, 42.0, ACCENT);
             p.text(1, 7.5, x + 10.0, top - 14.0, &k.label.to_uppercase(), MUTED);
+            if let Some(d) = k.delta {
+                let txt = if k.unit == "percent" {
+                    format!("{d:+.1} pts")
+                } else {
+                    format!("{d:+.1}%")
+                };
+                p.text_right(
+                    1,
+                    7.5,
+                    x + w - 6.0,
+                    top - 34.0,
+                    &format!("{txt} vs prev"),
+                    MUTED,
+                );
+            }
             p.text(
                 2,
                 15.0,
