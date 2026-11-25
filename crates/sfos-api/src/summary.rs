@@ -1167,7 +1167,7 @@ pub fn render_pdf(s: &Summary) -> Vec<u8> {
         }
     }
     let total = p.pages.len();
-    for i in 0..total {
+    for (i, page) in p.pages.iter_mut().enumerate() {
         let footer = format!(
             "Kira summary report  |  generated {}  |  page {} of {}",
             s.generated.format("%Y-%m-%d %H:%M UTC"),
@@ -1175,7 +1175,7 @@ pub fn render_pdf(s: &Summary) -> Vec<u8> {
             total
         );
         let t = crate::report::pdf_text(&footer, 140);
-        p.pages[i].push_str(&format!(
+        page.push_str(&format!(
             "BT /F1 7.5 Tf 0.42 0.46 0.53 rg {LEFT} 28 Td ({t}) Tj ET\n"
         ));
     }
