@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod live;
+mod productivity;
 mod query;
 mod report;
 
@@ -192,6 +193,13 @@ async fn main() -> Result<()> {
         .route("/api/v1/top", get(api::top))
         .route("/api/v1/dashboard/live", get(api::live_dashboards))
         .route("/api/v1/live/{kind}", get(live::live))
+        .route("/api/v1/productivity/summary", get(productivity::summary))
+        .route(
+            "/api/v1/productivity/guidelines",
+            get(productivity::list_guidelines)
+                .put(productivity::put_guideline)
+                .delete(productivity::delete_guideline),
+        )
         .route("/api/v1/events", get(api::events))
         .route("/api/v1/events/export", get(api::events_export))
         .route(

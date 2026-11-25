@@ -174,6 +174,17 @@ def main():
     check("live bandwidth sees ingested traffic", st == 200 and (bw["data"]["total_up"] + bw["data"]["total_down"]) > 0)
     check("unknown live tab rejected", admin.call("GET", "/api/v1/live/nope")[0] == 400)
 
+    # ---- productivity guidelines, browse time, Site Clean
+    st, g = admin.call("GET", "/api/v1/productivity/guidelines")
+    check("default productivity guidelines seeded", st == 200 and len(g.get("items", [])) >= 15, str(st))
+    st, _ = admin.call("PUT", "/api/v1/productivity/guidelines", {"kind": "site", "key": "e2e-test.example", "class": "unproductive"})
+    check("admin can add a guideline", st == 200)
+    check("bad guideline class refused", admin.call("PUT", "/api/v1/productivity/guidelines", {"kind": "site", "key": "x.example", "class": "bad"})[0] == 400)
+    st, sm = admin.call("GET", "/api/v1/productivity/summary?window=60")
+    check("productivity summary responds", st == 200 and all(k in sm for k in ("shares", "sites", "browse_time", "categories")), str(st))
+    st, _ = admin.call("DELETE", "/api/v1/productivity/guidelines?kind=site&key=e2e-test.example")
+    check("admin can delete a guideline", st == 200)
+
     # ---- rate limiting last (it would lock this IP out)
     if not a.skip_ratelimit:
         t = Client(a.api)

@@ -6,6 +6,16 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.4.0]
+
+### Added
+- Site Clean: `sfos_site()` merges sub-domains into the registrable site and `sfos_is_noise_site()` removes ad,
+  tracker, CDN and OS-update noise; cleaned `sites` are rolled up per minute.
+- Productivity guidelines (category/application/site -> productive, neutral, unproductive) with defaults
+  seeded per tenant; `GET/PUT/DELETE /api/v1/productivity/guidelines` (writes are admin-only).
+- Browse time: minutes with web activity per user, and per site (`GET /api/v1/productivity/summary`).
+- New Productivity tab: productivity split, browse time per user, cleaned top sites, guideline editor.
+
 ## [0.3.0]
 
 ### Added

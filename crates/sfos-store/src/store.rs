@@ -69,6 +69,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0017_minute_rollups",
         include_str!("../migrations/0017_minute_rollups.sql"),
     ),
+    (
+        "0018_productivity_siteclean",
+        include_str!("../migrations/0018_productivity_siteclean.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -423,6 +427,10 @@ impl Store {
             .execute("SELECT seed_default_report_templates($1)", &[&tenant.id])
             .await
             .context("seeding default report templates")?;
+        client
+            .execute("SELECT seed_default_productivity($1)", &[&tenant.id])
+            .await
+            .context("seeding default productivity guidelines")?;
         Ok(tenant)
     }
 
@@ -568,6 +576,10 @@ impl Store {
             ('applications', NULLIF(e.application, '')),
             ('categories', CASE WHEN e.category_group = 'web' THEN NULLIF(e.category, '') END),
             ('domains', CASE WHEN e.category_group = 'web' THEN NULLIF(e.domain, '') END),
+            ('sites', CASE WHEN e.category_group = 'web' AND NOT sfos_is_noise_site(sfos_site(e.domain))
+                THEN sfos_site(e.domain) END),
+            ('web_users', CASE WHEN e.category_group = 'web'
+                THEN COALESCE(NULLIF(e.user_name, ''), host(e.src_ip)) END),
             ('threats', CASE WHEN e.category_group = 'threat'
                 THEN COALESCE(NULLIF(e.threat_name, ''), NULLIF(e.reason, '')) END),
             ('threat_sources', CASE WHEN e.category_group = 'threat' THEN host(e.src_ip) END),
