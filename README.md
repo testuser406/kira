@@ -286,6 +286,15 @@ and an end-to-end job that builds the release binaries, starts them against a Po
 
 ## Troubleshooting
 
+**Logs not arriving? Start here.**
+
+- **Dashboard:** open the **System** tab. It shows the last event, events per minute, the collector counters and, if something
+  is wrong, a diagnosis card with the exact command-line *and* Windows/Sophos screen steps to fix it.
+- **Command line:** `.\scripts\windows\kira.ps1 doctor` checks services, ports, firewall rules, network profile
+  (Public blocks the rules), live counters (two samples), newest stored event, recent log errors and disk space.
+  `doctor -Fix` restarts Kira and (as Administrator) re-opens the firewall.
+- Full guide: [docs/troubleshooting.md](docs/troubleshooting.md).
+
 | Symptom | Check |
 | --- | --- |
 | Dashboard empty, no errors | `curl.exe :8081/metrics`; `parsed` must increase. Confirm the firewall targets this host's LAN IP on `5514` and *Device standard format*. The collector must listen on `0.0.0.0` (default; check with `ss -lunp | grep 5514`), and the host firewall must allow UDP 5514. |

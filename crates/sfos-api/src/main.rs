@@ -5,6 +5,7 @@ mod productivity;
 mod query;
 mod report;
 mod summary;
+mod system;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -194,6 +195,7 @@ async fn main() -> Result<()> {
         .route("/api/v1/top", get(api::top))
         .route("/api/v1/dashboard/live", get(api::live_dashboards))
         .route("/api/v1/live/{kind}", get(live::live))
+        .route("/api/v1/system/health", get(system::health))
         .route("/api/v1/reports/summary", get(summary::summary_report))
         .route("/api/v1/productivity/summary", get(productivity::summary))
         .route(

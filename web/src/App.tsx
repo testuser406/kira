@@ -8,9 +8,12 @@ import { KpiCards } from "./components/KpiCards";
 import { CollectorPanel, SecurityPanel } from "./components/SidePanels";
 import { TopPanel } from "./components/TopPanel";
 import { TrafficChart, type TrafficMode } from "./components/TrafficChart";
-import { LiveMinuteView, type LiveKind } from "./components/LiveMinute";
-import { ReportsPage } from "./components/ReportsPage";
-import { ProductivityPage } from "./components/ProductivityPage";
+import { Suspense, lazy } from "react";
+import type { LiveKind } from "./components/LiveMinute";
+const LiveMinuteView = lazy(() => import("./components/LiveMinute").then((m) => ({ default: m.LiveMinuteView })));
+const ReportsPage = lazy(() => import("./components/ReportsPage").then((m) => ({ default: m.ReportsPage })));
+const ProductivityPage = lazy(() => import("./components/ProductivityPage").then((m) => ({ default: m.ProductivityPage })));
+const SystemPage = lazy(() => import("./components/SystemPage").then((m) => ({ default: m.SystemPage })));
 import AlertRulesManager from "./components/AlertRulesManager";
 import ReportSchedulesManager from "./components/ReportSchedulesManager";
 import CustomReportsManager from "./components/CustomReportsManager";
@@ -24,7 +27,7 @@ const RANGES = [
   { id: "30d", label: "30d", hours: 720 },
 ] as const;
 
-type View = "overview" | "summary_reports" | "productivity_report" | "bandwidth" | "productivity" | "security" | "vpn";
+type View = "overview" | "system" | "summary_reports" | "productivity_report" | "bandwidth" | "productivity" | "security" | "vpn";
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -34,6 +37,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "vpn", label: "Live VPN" },
   { id: "productivity_report", label: "Productivity" },
   { id: "summary_reports", label: "Reports" },
+  { id: "system", label: "System" },
 ];
 
 type Tops = {
@@ -315,12 +319,14 @@ export default function App() {
 
         <KpiCards totals={overview?.totals ?? null} loading={!hasData} />
 
-        {view === "summary_reports" ? (
-          <ReportsPage tenant={tenant} />
+        {view === "system" ? (
+          <Suspense fallback={null}><SystemPage /></Suspense>
+        ) : view === "summary_reports" ? (
+          <Suspense fallback={null}><ReportsPage tenant={tenant} /></Suspense>
         ) : view === "productivity_report" ? (
-          <ProductivityPage tenant={tenant} />
+          <Suspense fallback={null}><ProductivityPage tenant={tenant} /></Suspense>
         ) : view !== "overview" ? (
-          <LiveMinuteView kind={view as LiveKind} tenant={tenant} />
+          <Suspense fallback={null}><LiveMinuteView kind={view as LiveKind} tenant={tenant} /></Suspense>
         ) : !hasData ? (
           <DashboardSkeleton />
         ) : waitingForLogs && !meta?.last_event_at ? (

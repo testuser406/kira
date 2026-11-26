@@ -132,6 +132,9 @@ jobs:
           .\scripts\windows\kira.ps1 start
           .\scripts\windows\kira.ps1 status
           try {
+            .\scripts\windows\kira.ps1 doctor
+          } catch { throw "doctor failed: $_" }
+          try {
             python scripts/replay-real-log.py fw1_samples.log --port 5514 --collector http://127.0.0.1:8081 --rebase
             if ($LASTEXITCODE -ne 0) { throw 'replay failed' }
             python scripts/e2e-check.py --api http://127.0.0.1:8080 --collector http://127.0.0.1:8081 --syslog 127.0.0.1:5514 --user admin --password ci-admin-password-123 --drop-noise conn_start,ip_spoof_broadcast

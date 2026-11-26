@@ -5,11 +5,12 @@
    .\scripts\windows\kira.ps1 start      start PostgreSQL, collector and API
    .\scripts\windows\kira.ps1 stop       stop everything
    .\scripts\windows\kira.ps1 status     show what is running and the collector counters
+   .\scripts\windows\kira.ps1 doctor     diagnose why logs are not arriving (add -Fix to apply safe fixes)
    .\scripts\windows\kira.ps1 firewall   open 8080 and 5514 on Domain/Private profiles (run as Administrator)
    .\scripts\windows\kira.ps1 autostart  start Kira when this user logs on
  Works in Windows PowerShell 5.1 and PowerShell 7. Settings come from kira.env in the repository root.
 #>
-param([Parameter(Position = 0)][ValidateSet('build', 'init', 'start', 'stop', 'status', 'firewall', 'autostart')][string]$Command = 'status')
+param([Parameter(Position = 0)][ValidateSet('build', 'init', 'start', 'stop', 'status', 'doctor', 'firewall', 'autostart')][string]$Command = 'status', [switch]$Fix)
 $ErrorActionPreference = 'Stop'
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -157,6 +158,8 @@ switch ($Command) {
         $env:DATABASE_URL = "postgres://${DbUser}@127.0.0.1:${port}/${DbName}"
         $env:DATABASE_PASSWORD = $pw
         $env:WEB_DIR = Join-Path $Root 'web\dist'
+        $hport = if ($cfg['HEALTH_ADDR']) { ($cfg['HEALTH_ADDR'] -split ':')[-1] } else { '8081' }
+        $env:INGEST_METRICS_URL = "http://127.0.0.1:$hport/metrics"
         if (-not $env:RUST_LOG) { $env:RUST_LOG = 'info' }
 
         if (Test-PgRunning $pgBin) {
@@ -211,6 +214,84 @@ switch ($Command) {
         }
         $hp = if ($cfg['HEALTH_ADDR']) { ($cfg['HEALTH_ADDR'] -split ':')[-1] } else { '8081' }
         try { (Invoke-RestMethod "http://127.0.0.1:$hp/metrics" -TimeoutSec 3) | ConvertTo-Json -Compress | Write-Host } catch { Write-Host 'collector metrics unavailable' }
+    }
+
+    'doctor' {
+        $cfg = Read-KiraEnv
+        $pgBin = Find-PgBin $cfg
+        $problems = New-Object System.Collections.ArrayList
+        function Ok($m) { Write-Host "  [ OK ] $m" -ForegroundColor Green }
+        function Bad($m, $fix) { Write-Host "  [FAIL] $m" -ForegroundColor Red; if ($fix) { Write-Host "         -> $fix" -ForegroundColor Yellow }; [void]$problems.Add($m) }
+        function Warn($m, $fix) { Write-Host "  [WARN] $m" -ForegroundColor Yellow; if ($fix) { Write-Host "         -> $fix" -ForegroundColor Yellow } }
+        $sysPort = if ($cfg['SYSLOG_UDP_ADDR']) { ($cfg['SYSLOG_UDP_ADDR'] -split ':')[-1] } else { '5514' }
+        $hp = if ($cfg['HEALTH_ADDR']) { ($cfg['HEALTH_ADDR'] -split ':')[-1] } else { '8081' }
+
+        Write-Host "`n1. Services"
+        if (Test-PgRunning $pgBin) { Ok 'PostgreSQL is running' } else { Bad 'PostgreSQL is stopped' "run: .\scripts\windows\kira.ps1 start" }
+        foreach ($n in 'ingest', 'api') {
+            $f = Join-Path $Pids "$n.pid"
+            $p = if (Test-Path $f) { Get-Process -Id ([int](Get-Content $f -Raw)) -ErrorAction SilentlyContinue } else { $null }
+            if ($p) { Ok "$n is running (PID $($p.Id))" } else { Bad "$n is not running" "run: .\scripts\windows\kira.ps1 start (details: .runtime\logs\$n*.err.log)" }
+        }
+
+        Write-Host "`n2. Ports on this PC"
+        $udp = Get-NetUDPEndpoint -LocalPort ([int]$sysPort) -ErrorAction SilentlyContinue
+        if ($udp) { Ok "UDP $sysPort is listening (PID $(($udp | Select-Object -First 1).OwningProcess))" } else { Bad "UDP $sysPort is not listening" 'start Kira, or another program may own the port: Get-NetUDPEndpoint -LocalPort 5514' }
+        $tcp = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
+        if ($tcp) { Ok 'Dashboard TCP 8080 is listening' } else { Bad 'Dashboard TCP 8080 is not listening' 'start Kira and check .runtime\logs\api.err.log' }
+
+        Write-Host "`n3. Windows Firewall and network profile"
+        $prof = Get-NetConnectionProfile -ErrorAction SilentlyContinue
+        foreach ($c in $prof) {
+            if ($c.NetworkCategory -eq 'Public') { Warn "Network '$($c.Name)' is Public - Kira's rules only apply to Domain/Private" "Settings > Network & internet > set the network profile to Private (or: Set-NetConnectionProfile -InterfaceIndex $($c.InterfaceIndex) -NetworkCategory Private as Administrator)" }
+            else { Ok "Network '$($c.Name)' profile: $($c.NetworkCategory)" }
+        }
+        $rules = Get-NetFirewallRule -DisplayName 'Kira*' -ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' }
+        if ($rules.Count -ge 3) { Ok "$($rules.Count) Kira firewall rules are enabled" } else { Bad 'Kira firewall rules are missing or disabled' "run as Administrator: .\scripts\windows\kira.ps1 firewall (or: kira.ps1 doctor -Fix)" }
+
+        Write-Host "`n4. Is data arriving? (two samples, 10 s apart)"
+        $m1 = $null; $m2 = $null
+        try { $m1 = Invoke-RestMethod "http://127.0.0.1:$hp/metrics" -TimeoutSec 3; Start-Sleep -Seconds 10; $m2 = Invoke-RestMethod "http://127.0.0.1:$hp/metrics" -TimeoutSec 3 } catch { Bad 'collector metrics unavailable (collector not running?)' 'run: .\scripts\windows\kira.ps1 start' }
+        if ($m2) {
+            Write-Host ("  datagrams={0} parsed={1} rejected={2} denied_sources={3} written={4} db_errors={5} dropped={6} queue={7}%" -f $m2.datagrams, $m2.parsed, $m2.rejected, $m2.denied_sources, $m2.written, $m2.db_errors, $m2.dropped, [math]::Round($m2.queue_utilization_percent))
+            if ($m2.datagrams -eq 0 -and $m2.lines -eq 0) { Bad 'Nothing has ever reached the collector' "check firewall rules above, the Sophos syslog server entry (this PC's IP, port $sysPort, UDP, 'Device standard'), and that logging is enabled on the firewall rules" }
+            elseif (($m2.datagrams + $m2.lines) -le ($m1.datagrams + $m1.lines)) { Warn 'No new syslog in the last 10 s' 'Sophos may be idle, or sending stopped; generate traffic and re-run' } else { Ok 'Syslog is arriving' }
+            if ($m2.denied_sources -gt 0) { Bad "$($m2.denied_sources) datagrams from sources not in ALLOWED_SOURCES" 'edit kira.env: add the Sophos IP to ALLOWED_SOURCES (or leave empty), then stop/start' }
+            if ($m2.rejected -gt 0 -and $m2.parsed -eq 0) { Bad 'Logs arrive but none can be parsed' "set Sophos syslog format to 'Device standard'" }
+            if ($m2.db_errors -gt 0 -or $m2.dropped -gt 0) { Bad "database errors=$($m2.db_errors), dropped=$($m2.dropped)" 'see section 6 for the error lines; check disk space' }
+            elseif ($m2.written -gt $m1.written) { Ok 'Events are being written to the database' }
+        }
+
+        Write-Host "`n5. Newest stored event"
+        $psql = Join-Path $pgBin 'psql.exe'
+        $pw = Get-DbPassword $cfg
+        if ((Test-Path $psql) -and $pw) {
+            $port = if ($cfg['PG_PORT']) { $cfg['PG_PORT'] } else { '55432' }
+            $env:PGPASSWORD = $pw
+            $r = & $psql -h 127.0.0.1 -p $port -U $DbUser -d $DbName -Atc "SELECT now() - max(ts), max(ts) FROM events" 2>&1
+            Write-Host "  age / timestamp: $r"
+            if ($r -match '^-') { Warn 'Newest event is in the FUTURE: firewall clock or time zone differs from Kira' 'set DEFAULT_TZ_OFFSET_MINUTES in kira.env (e.g. 300 for UTC+5) and fix the firewall time zone' }
+            Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+        } else { Warn 'psql or database password not found; skipped' }
+
+        Write-Host "`n6. Recent errors in logs"
+        $hits = Get-ChildItem $Logs -Filter '*.err.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { Select-String -Path $_.FullName -Pattern 'ERROR|failed|panick|cannot bind|dropp' | Select-Object -Last 5 }
+        if ($hits) { $hits | ForEach-Object { Write-Host "  $($_.Filename): $($_.Line.Substring(0, [math]::Min(200, $_.Line.Length)))" -ForegroundColor Yellow } } else { Ok 'no recent errors' }
+        $d = Get-PSDrive -Name ($Root.Substring(0, 1)) -ErrorAction SilentlyContinue
+        if ($d -and $d.Free -lt 2GB) { Bad ("only {0:N1} GB free on {1}:" -f ($d.Free / 1GB), $d.Name) 'free disk space; PostgreSQL stops writing when the disk is full' }
+
+        Write-Host ''
+        if ($problems.Count -eq 0) { Write-Host 'No blocking problem found.' -ForegroundColor Green }
+        else {
+            Write-Host "$($problems.Count) problem(s) found." -ForegroundColor Red
+            if ($Fix) {
+                Write-Host 'Applying safe fixes: restart services, open firewall (if Administrator)...'
+                & $PSCommandPath stop
+                & $PSCommandPath start
+                $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+                if ($admin) { & $PSCommandPath firewall } else { Write-Warning 'Not Administrator: firewall rules were not changed. Re-run in an Administrator PowerShell.' }
+            } else { Write-Host 'Run again with -Fix to restart services and open the firewall.' }
+        }
     }
 
     'firewall' {

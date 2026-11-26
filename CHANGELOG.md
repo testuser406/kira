@@ -6,6 +6,16 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.5.3]
+
+### Added
+- **System** tab and `GET /api/v1/system/health`: last event age, events per minute, collector counters and automatic diagnosis cards with command-line and GUI fix steps.
+- `kira.ps1 doctor [-Fix]`: automatic troubleshooting for services, ports, firewall, network profile, counters, newest event, logs and disk space.
+- `docs/troubleshooting.md`.
+
+### Changed
+- Dashboard is code-split (lazy tabs, separate charts chunk): no more large-chunk build warning.
+
 ## [0.5.2]
 
 ### Fixed

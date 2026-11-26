@@ -201,6 +201,11 @@ def main():
     check("user overview works for a user", admin.call("GET", "/api/v1/reports/summary?type=user_overview&user=nobody-e2e")[0] == 200)
     check("unknown summary type rejected", admin.call("GET", "/api/v1/reports/summary?type=bogus")[0] == 400)
 
+    # ---- system health / troubleshooting
+    st, hl = admin.call("GET", "/api/v1/system/health")
+    check("system health responds", st == 200 and hl.get("status") in ("ok", "warn", "error") and "diagnosis" in hl, f"{st}")
+    check("system health sees recent events", st == 200 and hl.get("events_last_60m", 0) > 0, str(hl.get("events_last_60m")))
+
     # ---- rate limiting last (it would lock this IP out)
     if not a.skip_ratelimit:
         t = Client(a.api)
