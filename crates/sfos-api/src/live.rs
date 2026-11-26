@@ -99,6 +99,7 @@ fn sum(points: &[Value], field: &str) -> i64 {
 
 pub async fn live(
     State(state): State<AppState>,
+    axum::Extension(cu): axum::Extension<crate::auth::CurrentUser>,
     Path(kind): Path<String>,
     Query(q): Query<LiveQuery>,
 ) -> Result<Json<Value>, ApiError> {
@@ -183,6 +184,14 @@ pub async fn live(
         _ => return Err(ApiError::bad_request("unknown live dashboard")),
     };
 
+    let mut body = body;
+    if crate::settings::masks_for(&state, &cu).await {
+        for k in ["top_users", "users"] {
+            if let Some(a) = body.get_mut(k).and_then(|v| v.as_array_mut()) {
+                crate::settings::mask_ranked(a);
+            }
+        }
+    }
     Ok(Json(
         json!({ "kind": kind, "window_min": window, "generated_at": chrono::Utc::now(), "data": body }),
     ))

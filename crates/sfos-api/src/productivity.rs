@@ -94,6 +94,7 @@ pub async fn delete_guideline(
 
 pub async fn summary(
     State(state): State<AppState>,
+    axum::Extension(cu): axum::Extension<crate::auth::CurrentUser>,
     Query(q): Query<TenantQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let _permit = acquire_query_permit(
@@ -186,6 +187,10 @@ pub async fn summary(
         })
         .collect();
 
+    let mut users = users;
+    if crate::settings::masks_for(&state, &cu).await {
+        crate::settings::mask_ranked(&mut users);
+    }
     Ok(Json(json!({
         "window_min": window, "shares": shares, "sites": sites,
         "browse_time": users, "categories": cats

@@ -6,6 +6,14 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.8.0]
+
+### Added
+- **Disk spill:** if PostgreSQL is unavailable, batches are parked in `.runtime\spill` (cap `SPILL_MAX_MB`, default 500) and replayed automatically every 15 s; counters `spilled`, `replayed`, `spill_files_pending`.
+- **Backups:** `kira.ps1 backup` (pg_dump, keeps the newest 14 in `.runtime\backups`) and `kira.ps1 restore -File <dump>`.
+- **Prometheus:** `GET /metrics` with `Authorization: Bearer $METRICS_TOKEN` (disabled when the token is unset).
+- **Privacy setting:** hide user names and IPs from non-admin viewers (stable aliases) in reports, live tabs and productivity; admins always see real names. `GET/PUT /api/v1/settings`.
+
 ## [0.7.0]
 
 ### Added

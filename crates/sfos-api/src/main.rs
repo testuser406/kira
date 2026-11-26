@@ -5,6 +5,7 @@ mod live;
 mod productivity;
 mod query;
 mod report;
+mod settings;
 mod summary;
 mod system;
 
@@ -197,6 +198,11 @@ async fn main() -> Result<()> {
         .route("/api/v1/dashboard/live", get(api::live_dashboards))
         .route("/api/v1/live/{kind}", get(live::live))
         .route("/api/v1/system/health", get(system::health))
+        .route(
+            "/api/v1/settings",
+            get(settings::get_settings).put(settings::put_settings),
+        )
+        .route("/metrics", get(system::prometheus))
         .route("/api/v1/reports/summary", get(summary::summary_report))
         .route("/api/v1/productivity/summary", get(productivity::summary))
         .route(

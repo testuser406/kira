@@ -1671,6 +1671,7 @@ pub struct SummaryQuery {
 /// `GET /api/v1/reports/summary?type=&from=&to=&user=&top=&format=json|csv|pdf`
 pub async fn summary_report(
     State(state): State<AppState>,
+    axum::Extension(cu): axum::Extension<crate::auth::CurrentUser>,
     Query(q): Query<SummaryQuery>,
 ) -> Result<Response, ApiError> {
     let _permit = acquire_query_permit(
@@ -1709,6 +1710,11 @@ pub async fn summary_report(
         q.top.unwrap_or(15),
     )
     .await?;
+    let mut summary = summary;
+    let masked = crate::settings::masks_for(&state, &cu).await;
+    if masked {
+        crate::settings::mask_summary(&mut summary);
+    }
     match q.format.as_deref().unwrap_or("json") {
         "json" => Ok(axum::Json(&summary).into_response()),
         f => {

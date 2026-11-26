@@ -6,11 +6,13 @@
    .\scripts\windows\kira.ps1 stop       stop everything
    .\scripts\windows\kira.ps1 status     show what is running and the collector counters
    .\scripts\windows\kira.ps1 doctor     diagnose why logs are not arriving (add -Fix to apply safe fixes)
+   .\scripts\windows\kira.ps1 backup     dump the database to .runtime\backups (keeps the newest 14)
+   .\scripts\windows\kira.ps1 restore -File <dump>   restore a backup (stops Kira's apps first)
    .\scripts\windows\kira.ps1 firewall   open 8080 and 5514 on Domain/Private profiles (run as Administrator)
    .\scripts\windows\kira.ps1 autostart  start Kira when this user logs on
  Works in Windows PowerShell 5.1 and PowerShell 7. Settings come from kira.env in the repository root.
 #>
-param([Parameter(Position = 0)][ValidateSet('build', 'init', 'start', 'stop', 'status', 'doctor', 'firewall', 'autostart')][string]$Command = 'status', [switch]$Fix)
+param([Parameter(Position = 0)][ValidateSet('build', 'init', 'start', 'stop', 'status', 'doctor', 'backup', 'restore', 'firewall', 'autostart')][string]$Command = 'status', [switch]$Fix, [string]$File = '')
 $ErrorActionPreference = 'Stop'
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -161,6 +163,7 @@ switch ($Command) {
         $env:DATABASE_URL = "postgres://${DbUser}@127.0.0.1:${port}/${DbName}"
         $env:DATABASE_PASSWORD = $pw
         $env:WEB_DIR = Join-Path $Root 'web\dist'
+        $env:SPILL_DIR = Join-Path $Runtime 'spill'
         $hport = if ($cfg['HEALTH_ADDR']) { ($cfg['HEALTH_ADDR'] -split ':')[-1] } else { '8081' }
         $env:INGEST_METRICS_URL = "http://127.0.0.1:$hport/metrics"
         if (-not $env:RUST_LOG) { $env:RUST_LOG = 'info' }
@@ -310,6 +313,38 @@ switch ($Command) {
         }
     }
 
+    'backup' {
+        $cfg = Read-KiraEnv
+        $pgBin = Find-PgBin $cfg
+        if (-not (Test-PgRunning $pgBin)) { throw 'PostgreSQL is not running. Run: .\scripts\windows\kira.ps1 start' }
+        $dir = Join-Path $Runtime 'backups'
+        New-Item -ItemType Directory -Force $dir | Out-Null
+        $out = Join-Path $dir ('kira-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.dump')
+        $port = if ($cfg['PG_PORT']) { $cfg['PG_PORT'] } else { '55432' }
+        $env:PGPASSWORD = Get-DbPassword $cfg
+        & (Join-Path $pgBin 'pg_dump.exe') -h 127.0.0.1 -p $port -U $DbUser -d $DbName -Fc -f $out
+        $code = $LASTEXITCODE
+        Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+        if ($code -ne 0) { Remove-Item $out -ErrorAction SilentlyContinue; throw 'pg_dump failed' }
+        Get-ChildItem $dir -Filter 'kira-*.dump' | Sort-Object LastWriteTime -Descending | Select-Object -Skip 14 | Remove-Item -Force
+        Write-Host ("Backup written: {0} ({1:N1} MB)" -f $out, ((Get-Item $out).Length / 1MB)) -ForegroundColor Green
+        Write-Host 'Copy it to another disk or machine; a backup on the same disk does not survive disk failure.'
+    }
+    'restore' {
+        if (-not $File -or -not (Test-Path $File)) { throw 'Usage: .\scripts\windows\kira.ps1 restore -File .runtime\backups\kira-YYYYMMDD-HHMMSS.dump' }
+        $cfg = Read-KiraEnv
+        $pgBin = Find-PgBin $cfg
+        if (-not (Test-PgRunning $pgBin)) { throw 'PostgreSQL is not running. Run: .\scripts\windows\kira.ps1 start, then stop Kira apps and retry' }
+        Stop-KiraProcess 'api'
+        Stop-KiraProcess 'ingest'
+        $port = if ($cfg['PG_PORT']) { $cfg['PG_PORT'] } else { '55432' }
+        $env:PGPASSWORD = Get-DbPassword $cfg
+        & (Join-Path $pgBin 'pg_restore.exe') -h 127.0.0.1 -p $port -U $DbUser -d $DbName --clean --if-exists --no-owner $File
+        $code = $LASTEXITCODE
+        Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+        if ($code -gt 1) { throw "pg_restore failed (exit $code)" }
+        Write-Host 'Restore finished. Start Kira again: .\scripts\windows\kira.ps1 start' -ForegroundColor Green
+    }
     'firewall' {
         $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         if (-not $admin) { throw 'Run this in an Administrator PowerShell.' }

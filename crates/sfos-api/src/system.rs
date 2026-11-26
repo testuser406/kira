@@ -185,3 +185,79 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<Value>, ApiErr
         "diagnosis": hints,
     })))
 }
+
+/// Prometheus text exposition. Requires `METRICS_TOKEN` (Bearer); disabled (404) when it is not set.
+pub async fn prometheus(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    let Ok(token) = std::env::var("METRICS_TOKEN") else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let given = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+    if token.is_empty() || given != token {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Ok(Json(h)) = health(State(state)).await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let mut out = String::new();
+    let mut g = |name: &str, help: &str, v: f64| {
+        out.push_str(&format!(
+            "# HELP {name} {help}\n# TYPE {name} gauge\n{name} {v}\n"
+        ));
+    };
+    g(
+        "kira_database_up",
+        "1 when PostgreSQL is reachable",
+        if h["database"]["ok"] == true {
+            1.0
+        } else {
+            0.0
+        },
+    );
+    g(
+        "kira_database_size_bytes",
+        "Database size",
+        h["database"]["size_bytes"].as_f64().unwrap_or(0.0),
+    );
+    g(
+        "kira_last_event_age_seconds",
+        "Seconds since the newest stored event",
+        h["last_event_age_secs"].as_f64().unwrap_or(-1.0),
+    );
+    g(
+        "kira_events_last_minute",
+        "Events stored in the last 2 minutes",
+        h["events_last_1m"].as_f64().unwrap_or(0.0),
+    );
+    g(
+        "kira_events_last_hour",
+        "Events stored in the last hour",
+        h["events_last_60m"].as_f64().unwrap_or(0.0),
+    );
+    g(
+        "kira_collector_up",
+        "1 when the collector answers",
+        if h["ingest"].is_object() { 1.0 } else { 0.0 },
+    );
+    if let Some(m) = h["ingest"].as_object() {
+        for (k, v) in m {
+            if let Some(n) = v.as_f64() {
+                g(&format!("kira_collector_{k}"), "Collector counter", n);
+            }
+        }
+    }
+    (
+        StatusCode::OK,
+        [("content-type", "text/plain; version=0.0.4")],
+        out,
+    )
+        .into_response()
+}

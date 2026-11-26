@@ -81,14 +81,25 @@ async fn flush(store: &Store, batch: &mut HashMap<Uuid, Vec<Event>>, metrics: &S
                     attempt += 1;
                     metrics.db_errors.fetch_add(1, Ordering::Relaxed);
                     if attempt >= 3 {
-                        metrics
-                            .dropped
-                            .fetch_add(events.len() as u64, Ordering::Relaxed);
-                        tracing::error!(
-                            %err,
-                            rows = events.len(),
-                            "failed to write batch after 3 attempts; dropping"
-                        );
+                        if crate::spill::write(tenant_id, &events) {
+                            metrics
+                                .spilled
+                                .fetch_add(events.len() as u64, Ordering::Relaxed);
+                            tracing::error!(
+                                %err,
+                                rows = events.len(),
+                                "failed to write batch after 3 attempts; spilled to disk for replay"
+                            );
+                        } else {
+                            metrics
+                                .dropped
+                                .fetch_add(events.len() as u64, Ordering::Relaxed);
+                            tracing::error!(
+                                %err,
+                                rows = events.len(),
+                                "failed to write batch after 3 attempts; dropping"
+                            );
+                        }
                         break;
                     }
                     tracing::warn!(%err, attempt, "batch write failed, retrying");

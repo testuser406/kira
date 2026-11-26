@@ -220,6 +220,15 @@ def main():
         check("alert notify bad format rejected", admin.call("PUT", f"/api/v1/alerts/rules/{rid}/notify", {"webhook_format": "xml"})[0] == 400)
         admin.call("DELETE", f"/api/v1/alerts/rules/{rid}")
 
+    # ---- settings, masking, metrics
+    st, sb = admin.call("GET", "/api/v1/settings")
+    check("settings readable", st == 200 and "mask_users" in sb, str(st))
+    check("admin can enable user masking", admin.call("PUT", "/api/v1/settings", {"mask_users": True})[0] == 200)
+    st, ms = admin.call("GET", "/api/v1/reports/summary?type=user&from=24h")
+    check("admins still see real names while masking is on", st == 200)
+    admin.call("PUT", "/api/v1/settings", {"mask_users": False})
+    check("metrics endpoint disabled without METRICS_TOKEN", admin.raw("GET", "/metrics")[0] == 404)
+
     # ---- rate limiting last (it would lock this IP out)
     if not a.skip_ratelimit:
         t = Client(a.api)

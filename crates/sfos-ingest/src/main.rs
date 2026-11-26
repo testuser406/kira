@@ -3,6 +3,7 @@ mod listener;
 mod metrics;
 mod pipeline;
 mod sources;
+mod spill;
 mod writer;
 
 use std::sync::atomic::Ordering;
@@ -96,6 +97,23 @@ async fn main() -> Result<()> {
         cfg.keep_extended_attributes,
         cfg.max_line,
     ));
+    spill::init(
+        std::env::var("SPILL_DIR").ok(),
+        std::env::var("SPILL_MAX_MB")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(500),
+    );
+    {
+        let (store, metrics) = (store.clone(), metrics.clone());
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(15));
+            loop {
+                tick.tick().await;
+                spill::replay(&store, &metrics).await;
+            }
+        });
+    }
     let writer_task = tokio::spawn(writer::run(
         store.clone(),
         rx,

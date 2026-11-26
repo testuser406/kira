@@ -38,6 +38,31 @@ function Steps({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function PrivacySetting() {
+  const [mask, setMask] = useState<boolean | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    fetch("/api/v1/settings", { credentials: "same-origin" }).then((r) => r.json()).then((b) => setMask(!!b.mask_users)).catch(() => setMask(null));
+  }, []);
+  const save = async (v: boolean) => {
+    const r = await fetch("/api/v1/settings", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ mask_users: v }) });
+    if (r.ok) { setMask(v); setMsg("Saved"); } else setMsg(r.status === 403 ? "Administrator role required" : `HTTP ${r.status}`);
+  };
+  if (mask === null) return null;
+  return (
+    <Card>
+      <CardHeader title="Privacy" />
+      <div className="px-5 py-4">
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={mask} onChange={(e) => void save(e.target.checked)} />
+          Hide user names and IPs from non-admin viewers (shown as user-xxxxxxxx)
+        </label>
+        {msg ? <p className="mt-1 text-xs text-slate-500">{msg}</p> : null}
+      </div>
+    </Card>
+  );
+}
+
 export function SystemPage() {
   const [h, setH] = useState<Health | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -61,7 +86,7 @@ export function SystemPage() {
   const counters: [string, string][] = ing
     ? [["Datagrams received", fmtNumber(ing.datagrams)], ["Parsed events", fmtNumber(ing.parsed)], ["Rejected lines", fmtNumber(ing.rejected)],
        ["Denied sources", fmtNumber(ing.denied_sources)], ["Written to DB", fmtNumber(ing.written)], ["DB errors", fmtNumber(ing.db_errors)],
-       ["Dropped", fmtNumber(ing.dropped)], ["Queue", `${Math.round(ing.queue_utilization_percent)}%`]]
+       ["Dropped", fmtNumber(ing.dropped)], ["Spilled to disk", fmtNumber(ing.spilled ?? 0)], ["Replayed", fmtNumber(ing.replayed ?? 0)], ["Queue", `${Math.round(ing.queue_utilization_percent)}%`]]
     : [];
   return (
     <div className="space-y-4">
@@ -99,6 +124,7 @@ export function SystemPage() {
             ) : <p className="px-5 py-4 text-sm text-slate-500">Collector is not reachable.</p>}
             <p className="px-5 pb-4 text-xs text-slate-500">Database size {fmtBytes(h.database.size_bytes)} · for a full automatic check run <code className="text-sky-200">.\scripts\windows\kira.ps1 doctor</code></p>
           </Card>
+          <PrivacySetting />
         </>
       ) : !err ? <Card><div className="p-8 text-sm text-slate-500">Checking…</div></Card> : null}
     </div>

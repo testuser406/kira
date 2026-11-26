@@ -284,6 +284,13 @@ and an end-to-end job that builds the release binaries, starts them against a Po
 
 ---
 
+## Operations
+
+- **Backup:** `.\scripts\windows\kira.ps1 backup` writes `.runtime\backups\kira-<time>.dump`; copy it off the disk. Restore with `kira.ps1 restore -File <dump>`, then `start`.
+- **Database outage:** the collector spills batches to `.runtime\spill` and replays them when PostgreSQL returns (System tab shows *Spilled to disk* / *Replayed*).
+- **Monitoring:** set `METRICS_TOKEN` in `kira.env`, then scrape `http://<kira>:8080/metrics` with a Bearer token (Prometheus/Zabbix HTTP agent).
+- **Privacy:** System tab > Privacy hides user names and IPs from non-admin viewers.
+
 ## Alerts
 
 Create rules under the dashboard's alert section. Conditions look at the last hour of per-minute data:
