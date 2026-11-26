@@ -6,6 +6,17 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.6.0]
+
+### Added
+- **Internet searches** report: search terms decoded from Google, Bing, DuckDuckGo, Yahoo, Yandex, Baidu, Ecosia, Brave, Startpage, Ask and YouTube search URLs. KPIs, trend, top terms, users, engines and recent searches; optional user filter.
+- **YouTube videos** report: video ids from watch, youtu.be, shorts, embed and live URLs with views, users, last seen and links.
+- Both are stored in `web_searches` / `web_videos` (kept 90 days), available in the Reports tab, exports (PDF/CSV) and as scheduled reports.
+- `doctor` waits for a freshly started collector before reporting the syslog port as closed.
+
+### Notes
+- URLs are only visible for HTTP, or HTTPS with SSL/TLS inspection enabled on the firewall.
+
 ## [0.5.4]
 
 ### Fixed

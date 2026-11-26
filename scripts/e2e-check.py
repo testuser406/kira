@@ -187,7 +187,8 @@ def main():
 
     # ---- summary reports (rollup based, concise)
     for rt in ("executive", "online_productivity", "user", "websites_allowed_blocked", "activity_timeline",
-               "firewall_policy", "security_threat", "network_bandwidth", "vpn_connections", "subnet"):
+               "firewall_policy", "security_threat", "network_bandwidth", "vpn_connections", "subnet",
+               "internet_searches", "youtube_videos"):
         st, body = admin.call("GET", f"/api/v1/reports/summary?type={rt}&from=24h")
         check(f"summary {rt} builds", st == 200 and body.get("kpis") is not None and len(body.get("sections", [])) >= 1, f"{st} {str(body)[:120]}")
     st, ex = admin.call("GET", "/api/v1/reports/summary?type=executive&from=1h")

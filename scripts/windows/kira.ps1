@@ -248,7 +248,9 @@ switch ($Command) {
         }
 
         Write-Host "`n2. Ports on this PC"
-        $udp = Get-NetUDPEndpoint -LocalPort ([int]$sysPort) -ErrorAction SilentlyContinue
+        # A collector that was just (re)started needs a few seconds before it listens.
+        $udp = $null
+        for ($w = 0; $w -lt 6 -and -not $udp; $w++) { $udp = Get-NetUDPEndpoint -LocalPort ([int]$sysPort) -ErrorAction SilentlyContinue; if (-not $udp) { Start-Sleep -Seconds 2 } }
         if ($udp) { Ok "UDP $sysPort is listening (PID $(($udp | Select-Object -First 1).OwningProcess))" } else { Bad "UDP $sysPort is not listening" 'start Kira, or another program may own the port: Get-NetUDPEndpoint -LocalPort 5514' }
         $tcp = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
         if ($tcp) { Ok 'Dashboard TCP 8080 is listening' } else { Bad 'Dashboard TCP 8080 is not listening' 'start Kira and check .runtime\logs\api.err.log' }

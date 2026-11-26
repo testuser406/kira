@@ -9,6 +9,7 @@
 
 pub mod model;
 pub mod parse;
+pub mod webextract;
 
 pub use model::{Action, CategoryGroup, Event};
 pub use parse::{parse, parse_with_offset, parse_with_options, ParseError};

@@ -13,6 +13,8 @@ const TYPES: [string, string][] = [
   ["executive", "Executive summary"],
   ["online_productivity", "Online productivity"],
   ["user_overview", "User overview"],
+  ["internet_searches", "Internet searches"],
+  ["youtube_videos", "YouTube videos"],
   ["user", "Users"],
   ["websites_allowed_blocked", "Allowed & blocked websites"],
   ["security_threat", "Security & threats"],
@@ -23,6 +25,7 @@ const TYPES: [string, string][] = [
   ["activity_timeline", "Activity timeline"],
 ];
 const RANGES: [string, string][] = [["24h", "Last 24 hours"], ["7d", "Last 7 days"], ["30d", "Last 30 days"], ["90d", "Last 90 days"], ["custom", "Custom range"]];
+const USER_TYPES = ["user_overview", "internet_searches", "youtube_videos"];
 const COLORS = ["#38bdf8", "#fb7185", "#34d399", "#fbbf24"];
 
 function fmt(v: number | string, unit: string): string {
@@ -48,7 +51,7 @@ export function ReportsPage({ tenant }: { tenant: string }) {
     const custom = range === "custom" && cFrom;
     const p = new URLSearchParams({ tenant, type, from: custom ? new Date(cFrom).toISOString() : range === "custom" ? "24h" : range, top: String(top), format });
     if (custom && cTo) p.set("to", new Date(cTo).toISOString());
-    if (type === "user_overview" && user.trim()) p.set("user", user.trim());
+    if (USER_TYPES.includes(type) && user.trim()) p.set("user", user.trim());
     return `/api/v1/reports/summary?${p}`;
   }, [tenant, type, range, top, user, cFrom, cTo]);
 
@@ -91,8 +94,8 @@ export function ReportsPage({ tenant }: { tenant: string }) {
               </label>
             </>
           ) : null}
-          {type === "user_overview" ? (
-            <label className="text-xs text-slate-500">User
+          {USER_TYPES.includes(type) ? (
+            <label className="text-xs text-slate-500">{type === "user_overview" ? "User" : "User (optional)"}
               <input className={`${sel} mt-1 block`} value={user} placeholder="username or IP" onChange={(e) => setUser(e.target.value)} />
             </label>
           ) : null}
@@ -218,6 +221,8 @@ function TableView({ section, onDrill }: { section: Section; onDrill?: (key: str
                       <span className="inline-block h-1 rounded-full bg-sky-400/70" style={{ width: `${Math.max(2, (v / max) * 60)}px` }} />
                       {fmt(v, section.columns[i].unit)}
                     </span>
+                  ) : typeof v === "string" && v.startsWith("youtu.be/") ? (
+                    <a className="text-sky-200 hover:underline" href={`https://${v}`} target="_blank" rel="noreferrer noopener">{v}</a>
                   ) : fmt(v, section.columns[i].unit)}
                 </td>
               ))}

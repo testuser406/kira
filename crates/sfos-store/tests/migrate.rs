@@ -59,4 +59,48 @@ async fn migrations_apply_twice_and_seed_templates() {
         .expect("count")
         .get(0);
     assert!(seeded >= 15, "default guidelines seeded, got {seeded}");
+
+    // Searches and YouTube views are extracted from URLs during the batch write.
+    store.ensure_partitions(2).await.expect("partitions");
+    let mk = |url: &str, action| sfos_core::model::Event {
+        ts: chrono::Utc::now(),
+        user_name: Some("e2e-user".into()),
+        src_ip: Some("10.9.9.9".into()),
+        url: Some(url.into()),
+        action: Some(action),
+        ..Default::default()
+    };
+    let events = vec![
+        mk(
+            "http://www.google.com/search?q=rust+axum",
+            sfos_core::model::Action::Allowed,
+        ),
+        mk(
+            "http://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            sfos_core::model::Action::Blocked,
+        ),
+        mk("http://example.com/", sfos_core::model::Action::Allowed),
+    ];
+    store
+        .copy_events(tenant.id, &events)
+        .await
+        .expect("copy events");
+    let n: i64 = client
+        .query_one(
+            "SELECT count(*) FROM web_searches WHERE term = 'rust axum' AND user_key = 'e2e-user'",
+            &[],
+        )
+        .await
+        .expect("searches")
+        .get(0);
+    assert_eq!(n, 1);
+    let v: i64 = client
+        .query_one(
+            "SELECT count(*) FROM web_videos WHERE video_id = 'dQw4w9WgXcQ' AND blocked",
+            &[],
+        )
+        .await
+        .expect("videos")
+        .get(0);
+    assert_eq!(v, 1);
 }

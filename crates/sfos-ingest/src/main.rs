@@ -178,6 +178,9 @@ async fn maintenance(
         if let Err(err) = store.roll_hourly(48).await {
             tracing::error!(%err, "failed to roll up hourly activity");
         }
+        if let Err(err) = store.drop_old_web_extracts().await {
+            tracing::error!(%err, "failed to prune searches/videos");
+        }
         if let Err(err) = store.drop_old_hourly().await {
             tracing::error!(%err, "failed to prune hourly activity");
         }

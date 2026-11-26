@@ -8,7 +8,9 @@ use uuid::Uuid;
 
 use crate::api::ApiError;
 
-pub const TYPES: [&str; 11] = [
+pub const TYPES: [&str; 13] = [
+    "internet_searches",
+    "youtube_videos",
     "executive",
     "user",
     "user_overview",
@@ -399,6 +401,19 @@ async fn build_one(
     top: i64,
 ) -> Result<Summary, ApiError> {
     let user = user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+    if report_type == "internet_searches" || report_type == "youtube_videos" {
+        return build_web(
+            client,
+            tenant,
+            tenant_name,
+            report_type,
+            from,
+            to,
+            user,
+            top.clamp(5, 100),
+        )
+        .await;
+    }
     if report_type == "user_overview" && user.is_none() {
         return Err(ApiError::bad_request("user_overview needs a user"));
     }
@@ -815,6 +830,252 @@ async fn build_one(
         to,
         generated: Utc::now(),
         granularity: if ctx.day { "day" } else { "hour" },
+        user,
+        kpis,
+        sections,
+    })
+}
+
+fn ts_label(t: DateTime<Utc>) -> String {
+    t.format("%Y-%m-%d %H:%M").to_string()
+}
+
+/// Searches and YouTube views come from the (90-day) event extracts, not the rollups.
+#[allow(clippy::too_many_arguments)]
+async fn build_web(
+    client: &tokio_postgres::Client,
+    tenant: Uuid,
+    tenant_name: &str,
+    report_type: &str,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    user: Option<String>,
+    top: i64,
+) -> Result<Summary, ApiError> {
+    let videos = report_type == "youtube_videos";
+    let table = if videos { "web_videos" } else { "web_searches" };
+    let item = if videos { "video_id" } else { "term" };
+    let day = (to - from) > Duration::hours(72);
+    let gran = if day { "day" } else { "hour" };
+    let w = "tenant_id = $1 AND ts >= $2 AND ts < $3 AND ($4::text IS NULL OR user_key = $4)";
+    let p: [&(dyn tokio_postgres::types::ToSql + Sync); 4] = [&tenant, &from, &to, &user];
+
+    let tot = client
+        .query_one(
+            &format!("SELECT count(*)::bigint, count(DISTINCT user_key)::bigint, count(DISTINCT {item})::bigint, count(*) FILTER (WHERE blocked)::bigint FROM {table} WHERE {w}"),
+            &p,
+        )
+        .await?;
+    let (n, users, distinct, blocked): (i64, i64, i64, i64) =
+        (tot.get(0), tot.get(1), tot.get(2), tot.get(3));
+    let (what, uniq) = if videos {
+        ("Video views", "Distinct videos")
+    } else {
+        ("Searches", "Distinct terms")
+    };
+    let kpis = vec![
+        kpi(what, n, "count"),
+        kpi("Users", users, "count"),
+        kpi(uniq, distinct, "count"),
+        kpi("Blocked", blocked, "count"),
+    ];
+
+    // Trend with gaps filled.
+    let rows = client
+        .query(
+            &format!("SELECT date_trunc('{gran}', ts AT TIME ZONE 'UTC'), count(*)::bigint FROM {table} WHERE {w} GROUP BY 1 ORDER BY 1"),
+            &p,
+        )
+        .await?;
+    let mut map = std::collections::HashMap::new();
+    for r in &rows {
+        map.insert(r.get::<_, NaiveDateTime>(0), r.get::<_, i64>(1));
+    }
+    let step = if day {
+        Duration::days(1)
+    } else {
+        Duration::hours(1)
+    };
+    let mut t = from.naive_utc();
+    t = if day {
+        t.date().and_hms_opt(0, 0, 0).unwrap_or(t)
+    } else {
+        t.with_minute(0)
+            .and_then(|x| x.with_second(0))
+            .and_then(|x| x.with_nanosecond(0))
+            .unwrap_or(t)
+    };
+    let (mut labels, mut values) = (Vec::new(), Vec::new());
+    while t < to.naive_utc() && labels.len() < 400 {
+        labels.push(if day {
+            t.format("%b %d").to_string()
+        } else {
+            t.format("%d %H:00").to_string()
+        });
+        values.push(map.remove(&t).unwrap_or(0) as f64);
+        t += step;
+    }
+    let mut trend = section(&format!("{what} over time"), vec![], vec![]);
+    trend.chart = Some(Chart {
+        unit: "count",
+        labels,
+        datasets: vec![Dataset {
+            name: what.to_string(),
+            values,
+        }],
+    });
+    let mut sections = vec![trend];
+
+    // Top items.
+    let item_label = if videos { "Video" } else { "Search term" };
+    let q = client
+        .query(
+            &format!("SELECT {item}, count(*)::bigint, count(DISTINCT user_key)::bigint, count(*) FILTER (WHERE blocked)::bigint, max(ts) FROM {table} WHERE {w} GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $5"),
+            &[&tenant, &from, &to, &user, &top],
+        )
+        .await?;
+    let rows = q
+        .iter()
+        .map(|r| {
+            let key: String = r.get(0);
+            let shown = if videos {
+                format!("youtu.be/{key}")
+            } else {
+                key
+            };
+            vec![
+                json!(shown),
+                json!(r.get::<_, i64>(1)),
+                json!(r.get::<_, i64>(2)),
+                json!(r.get::<_, i64>(3)),
+                json!(ts_label(r.get(4))),
+            ]
+        })
+        .collect();
+    sections.push(section(
+        &format!("Top {}", if videos { "videos" } else { "search terms" }),
+        vec![
+            col(item_label, "text"),
+            col(if videos { "Views" } else { "Searches" }, "count"),
+            col("Users", "count"),
+            col("Blocked", "count"),
+            col("Last seen", "text"),
+        ],
+        rows,
+    ));
+
+    // Top users.
+    let q = client
+        .query(
+            &format!("SELECT user_key, count(*)::bigint, count(DISTINCT {item})::bigint, count(*) FILTER (WHERE blocked)::bigint FROM {table} WHERE {w} GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $5"),
+            &[&tenant, &from, &to, &user, &top],
+        )
+        .await?;
+    let rows = q
+        .iter()
+        .map(|r| {
+            vec![
+                json!(r.get::<_, String>(0)),
+                json!(r.get::<_, i64>(1)),
+                json!(r.get::<_, i64>(2)),
+                json!(r.get::<_, i64>(3)),
+            ]
+        })
+        .collect();
+    sections.push(section(
+        if videos {
+            "Users by views"
+        } else {
+            "Users by searches"
+        },
+        vec![
+            col("User", "text"),
+            col(if videos { "Views" } else { "Searches" }, "count"),
+            col(uniq, "count"),
+            col("Blocked", "count"),
+        ],
+        rows,
+    ));
+
+    // Engines (searches only) and the most recent activity.
+    if !videos {
+        let q = client
+            .query(&format!("SELECT engine, count(*)::bigint, count(DISTINCT user_key)::bigint FROM {table} WHERE {w} GROUP BY 1 ORDER BY 2 DESC"), &p)
+            .await?;
+        let rows = q
+            .iter()
+            .map(|r| {
+                vec![
+                    json!(r.get::<_, String>(0)),
+                    json!(r.get::<_, i64>(1)),
+                    json!(r.get::<_, i64>(2)),
+                ]
+            })
+            .collect();
+        sections.push(section(
+            "Search engines",
+            vec![
+                col("Engine", "text"),
+                col("Searches", "count"),
+                col("Users", "count"),
+            ],
+            rows,
+        ));
+    }
+    let recent_sql = if videos {
+        format!("SELECT ts, user_key, video_id, blocked FROM {table} WHERE {w} ORDER BY ts DESC LIMIT $5")
+    } else {
+        format!("SELECT ts, user_key, engine || ': ' || term, blocked FROM {table} WHERE {w} ORDER BY ts DESC LIMIT $5")
+    };
+    let q = client
+        .query(&recent_sql, &[&tenant, &from, &to, &user, &top.max(25)])
+        .await?;
+    let rows = q
+        .iter()
+        .map(|r| {
+            let what: String = r.get(2);
+            let what = if videos {
+                format!("youtu.be/{what}")
+            } else {
+                what
+            };
+            vec![
+                json!(ts_label(r.get(0))),
+                json!(r.get::<_, String>(1)),
+                json!(what),
+                json!(if r.get::<_, bool>(3) {
+                    "blocked"
+                } else {
+                    "allowed"
+                }),
+            ]
+        })
+        .collect();
+    sections.push(section(
+        "Most recent activity",
+        vec![
+            col("Time (UTC)", "text"),
+            col("User", "text"),
+            col(if videos { "Video" } else { "Search" }, "text"),
+            col("Result", "text"),
+        ],
+        rows,
+    ));
+    if n == 0 {
+        sections[0].note = Some("No searches or videos found. URLs are only visible for HTTP or for HTTPS with SSL/TLS inspection enabled on the firewall; extracts are kept 90 days.".into());
+    }
+    Ok(Summary {
+        report_type: report_type.to_string(),
+        title: if videos {
+            "YouTube Videos".into()
+        } else {
+            "Internet Searches".into()
+        },
+        tenant: tenant_name.to_string(),
+        from,
+        to,
+        generated: Utc::now(),
+        granularity: gran,
         user,
         kpis,
         sections,

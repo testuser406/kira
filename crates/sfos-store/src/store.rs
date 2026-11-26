@@ -77,6 +77,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0019_hourly_activity",
         include_str!("../migrations/0019_hourly_activity.sql"),
     ),
+    (
+        "0020_searches_videos",
+        include_str!("../migrations/0020_searches_videos.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -484,6 +488,9 @@ impl Store {
                 }
             }
         }
+        if let Err(err) = Self::insert_web_extracts(&mut tx, tenant_id, events).await {
+            tracing::error!(%err, "search/video extraction failed; events kept");
+        }
         tx.execute(Self::DEVICE_ACTIVITY_BATCH_SQL, &[]).await?;
         tx.commit().await?;
         tracing::debug!(
@@ -567,6 +574,74 @@ impl Store {
         bytes_up = event_rollups.bytes_up + EXCLUDED.bytes_up,
         bytes_down = event_rollups.bytes_down + EXCLUDED.bytes_down
     "#;
+
+    /// Store search terms and YouTube video ids found in URLs (isolated in a savepoint).
+    async fn insert_web_extracts(
+        tx: &mut tokio_postgres::Transaction<'_>,
+        tenant_id: Uuid,
+        events: &[Event],
+    ) -> Result<()> {
+        use sfos_core::model::Action;
+        let (mut st, mut su, mut se, mut sq, mut sb) = (vec![], vec![], vec![], vec![], vec![]);
+        let (mut vt, mut vu, mut vi, mut vb) = (vec![], vec![], vec![], vec![]);
+        for e in events {
+            let Some(url) = e.url.as_deref().filter(|u| !u.is_empty()) else {
+                continue;
+            };
+            let user = e
+                .user_name
+                .clone()
+                .filter(|u| !u.is_empty())
+                .or_else(|| e.src_ip.clone());
+            let Some(user) = user else { continue };
+            let blocked = e.action == Some(Action::Blocked);
+            if let Some(s) = sfos_core::webextract::search_term(url) {
+                st.push(e.ts);
+                su.push(user.clone());
+                se.push(s.engine.to_string());
+                sq.push(s.term);
+                sb.push(blocked);
+            }
+            if let Some(id) = sfos_core::webextract::youtube_video(url) {
+                vt.push(e.ts);
+                vu.push(user);
+                vi.push(id);
+                vb.push(blocked);
+            }
+        }
+        if st.is_empty() && vt.is_empty() {
+            return Ok(());
+        }
+        let sp = tx.transaction().await?;
+        let res: Result<()> = async {
+            if !st.is_empty() {
+                sp.execute(
+                    "INSERT INTO web_searches (tenant_id, ts, user_key, engine, term, blocked)
+                     SELECT $1, * FROM UNNEST($2::timestamptz[], $3::text[], $4::text[], $5::text[], $6::bool[])",
+                    &[&tenant_id, &st, &su, &se, &sq, &sb],
+                )
+                .await?;
+            }
+            if !vt.is_empty() {
+                sp.execute(
+                    "INSERT INTO web_videos (tenant_id, ts, user_key, video_id, blocked)
+                     SELECT $1, * FROM UNNEST($2::timestamptz[], $3::text[], $4::text[], $5::bool[])",
+                    &[&tenant_id, &vt, &vu, &vi, &vb],
+                )
+                .await?;
+            }
+            Ok(())
+        }
+        .await;
+        match res {
+            Ok(()) => sp.commit().await?,
+            Err(e) => {
+                sp.rollback().await?;
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
 
     const MINUTE_ROLLUP_BATCH_SQL: &str = r#"
     INSERT INTO minute_rollups (
@@ -774,6 +849,24 @@ impl Store {
             )
             .await?;
         Ok(row.get(0))
+    }
+
+    /// Searches and video views are personal data: keep 90 days.
+    pub async fn drop_old_web_extracts(&self) -> Result<u64> {
+        let client = self.pool.get().await?;
+        let a = client
+            .execute(
+                "DELETE FROM web_searches WHERE ts < now() - interval '90 days'",
+                &[],
+            )
+            .await?;
+        let b = client
+            .execute(
+                "DELETE FROM web_videos WHERE ts < now() - interval '90 days'",
+                &[],
+            )
+            .await?;
+        Ok(a + b)
     }
 
     pub async fn drop_old_hourly(&self) -> Result<u64> {
