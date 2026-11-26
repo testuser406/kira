@@ -6,6 +6,12 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.5.4]
+
+### Fixed
+- `kira.env` inline comments (`ALLOWED_SOURCES=1.2.3.4   # note`) made the collector exit with "invalid CIDR" and receive no logs. `kira.ps1` now strips inline comments, the collector tolerates them, and the example file keeps comments on their own lines.
+- `kira.ps1 doctor` reports an invalid ALLOWED_SOURCES from the ingest log; `doctor -Fix` no longer stops a healthy PostgreSQL, and `start` retries PostgreSQL once and prints its log on failure.
+
 ## [0.5.3]
 
 ### Added

@@ -30,7 +30,10 @@ function Read-KiraEnv {
         if ($t -eq '' -or $t.StartsWith('#')) { continue }
         $i = $t.IndexOf('=')
         if ($i -lt 1) { continue }
-        $map[$t.Substring(0, $i).Trim()] = $t.Substring($i + 1).Trim()
+        $val = $t.Substring($i + 1)
+        # Strip trailing inline comments (whitespace + #); a # without leading space stays part of the value.
+        $val = ($val -replace '\s+#.*$', '').Trim()
+        $map[$t.Substring(0, $i).Trim()] = $val
     }
     return $map
 }
@@ -169,7 +172,17 @@ switch ($Command) {
             # A fresh log file name per start avoids "Permission denied" when an old server still holds postgres.log
             $pgLog = Join-Path $Logs ('postgres-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
             & (Join-Path $pgBin 'pg_ctl.exe') -D $PgData -l $pgLog -o "-p $port -c listen_addresses=127.0.0.1" -w start
-            if ($LASTEXITCODE -ne 0) { throw "PostgreSQL failed to start. See $pgLog" }
+            if ($LASTEXITCODE -ne 0) {
+                # A just-stopped server can still hold files for a moment (or antivirus scans them): retry once.
+                Write-Warning 'PostgreSQL did not start; retrying in 5 seconds...'
+                Start-Sleep -Seconds 5
+                $pgLog = Join-Path $Logs ('postgres-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
+                & (Join-Path $pgBin 'pg_ctl.exe') -D $PgData -l $pgLog -o "-p $port -c listen_addresses=127.0.0.1" -w start
+                if ($LASTEXITCODE -ne 0) {
+                    if (Test-Path $pgLog) { Get-Content $pgLog -Tail 15 | ForEach-Object { Write-Host "  pg: $_" -ForegroundColor Yellow } }
+                    throw "PostgreSQL failed to start. See $pgLog. If it says 'Access is denied', run PowerShell as the same user that ran init, and exclude the .runtime folder from antivirus."
+                }
+            }
         }
 
         Start-KiraProcess 'ingest' $ingest 'ingest'
@@ -277,6 +290,8 @@ switch ($Command) {
         Write-Host "`n6. Recent errors in logs"
         $hits = Get-ChildItem $Logs -Filter '*.err.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { Select-String -Path $_.FullName -Pattern 'ERROR|failed|panick|cannot bind|dropp' | Select-Object -Last 5 }
         if ($hits) { $hits | ForEach-Object { Write-Host "  $($_.Filename): $($_.Line.Substring(0, [math]::Min(200, $_.Line.Length)))" -ForegroundColor Yellow } } else { Ok 'no recent errors' }
+        $cidr = Get-ChildItem $Logs -Filter 'ingest*.err.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { Select-String -Path $_.FullName -Pattern 'invalid CIDR' | Select-Object -Last 1 }
+        if ($cidr) { Bad 'kira.env has an invalid ALLOWED_SOURCES value, so the collector refuses to start' 'edit kira.env: ALLOWED_SOURCES must be IPs/CIDRs separated by commas (e.g. 172.16.0.210), then run kira.ps1 start' }
         $d = Get-PSDrive -Name ($Root.Substring(0, 1)) -ErrorAction SilentlyContinue
         if ($d -and $d.Free -lt 2GB) { Bad ("only {0:N1} GB free on {1}:" -f ($d.Free / 1GB), $d.Name) 'free disk space; PostgreSQL stops writing when the disk is full' }
 
@@ -285,8 +300,7 @@ switch ($Command) {
         else {
             Write-Host "$($problems.Count) problem(s) found." -ForegroundColor Red
             if ($Fix) {
-                Write-Host 'Applying safe fixes: restart services, open firewall (if Administrator)...'
-                & $PSCommandPath stop
+                Write-Host 'Applying safe fixes: start missing services, open firewall (if Administrator)...'
                 & $PSCommandPath start
                 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
                 if ($admin) { & $PSCommandPath firewall } else { Write-Warning 'Not Administrator: firewall rules were not changed. Re-run in an Administrator PowerShell.' }

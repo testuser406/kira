@@ -100,6 +100,8 @@ fn parse_networks(raw: Option<&str>) -> Result<Vec<IpNet>> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
     };
+    // Tolerate a trailing inline comment (`1.2.3.4   # firewall`) from hand-edited env files.
+    let raw = raw.split('#').next().unwrap_or(raw);
     raw.split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -142,6 +144,13 @@ fn parse_tenant_map(raw: Option<&str>) -> Result<Vec<(IpNet, String)>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn networks_ignore_inline_comments() {
+        let n = super::parse_networks(Some("172.16.0.210          # only the firewall")).unwrap();
+        assert_eq!(n.len(), 1);
+        assert!(super::parse_networks(Some("not-an-ip")).is_err());
+    }
+
     use super::*;
 
     #[test]
