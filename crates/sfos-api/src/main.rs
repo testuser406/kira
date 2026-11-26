@@ -1,3 +1,4 @@
+mod alerts;
 mod api;
 mod auth;
 mod live;
@@ -257,6 +258,14 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/alerts/rules",
             get(api::list_alert_rules).post(api::create_alert_rule),
+        )
+        .route(
+            "/api/v1/alerts/rules/{id}/notify",
+            get(alerts::get_notify).put(alerts::put_notify),
+        )
+        .route(
+            "/api/v1/alerts/rules/{id}/test",
+            axum::routing::post(alerts::test_rule),
         )
         .route(
             "/api/v1/alerts/rules/{id}",

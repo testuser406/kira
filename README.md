@@ -284,6 +284,15 @@ and an end-to-end job that builds the release binaries, starts them against a Po
 
 ---
 
+## Alerts
+
+Create rules under the dashboard's alert section. Conditions look at the last hour of per-minute data:
+`threat` (count), `blocked_category` (`Category:count`), `large_transfer` (bytes), `user_bandwidth` (bytes by one user),
+`site_visits` (`site:count`) and `no_logs` (minutes of silence - catches a stopped firewall or collector).
+Deliver by e-mail (set `SMTP_*` in `kira.env`) and/or webhook. For **Zulip**, create an *Incoming webhook* bot
+using the *Slack-compatible* URL (`.../api/v1/external/slack_incoming?...`) and set the webhook format to *Chat text*.
+Use **Test** on a rule to verify delivery.
+
 ## Troubleshooting
 
 **Logs not arriving? Start here.**

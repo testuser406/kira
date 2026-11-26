@@ -81,6 +81,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0020_searches_videos",
         include_str!("../migrations/0020_searches_videos.sql"),
     ),
+    (
+        "0021_alert_notify",
+        include_str!("../migrations/0021_alert_notify.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 

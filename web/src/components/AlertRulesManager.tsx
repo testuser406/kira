@@ -6,8 +6,20 @@ import { Card, Button, Input, Select, Skeleton } from "./ui";
 const CONDITION_TYPES = [
   { value: "threat", label: "Threat detected" },
   { value: "blocked_category", label: "Blocked web category" },
-  { value: "large_transfer", label: "Large data transfer" },
+  { value: "large_transfer", label: "Large data transfer (bytes/hour)" },
+  { value: "user_bandwidth", label: "Single user bandwidth (bytes/hour)" },
+  { value: "site_visits", label: "Site visits (site:count/hour)" },
+  { value: "no_logs", label: "No logs received (minutes)" },
 ] as const;
+
+const HINTS: Record<string, string> = {
+  threat: "Number of threat events in the last hour, e.g. 5",
+  blocked_category: "Category:count, e.g. Gambling:3",
+  large_transfer: "Bytes in the last hour, e.g. 5000000000",
+  user_bandwidth: "Bytes by one user in the last hour, e.g. 2000000000",
+  site_visits: "site:count, e.g. facebook.com:200",
+  no_logs: "Minutes of silence, e.g. 15",
+};
 
 const SEVERITIES = ["low", "medium", "high", "critical"] as const;
 
@@ -16,6 +28,9 @@ export default function AlertRulesManager() {
   const [instances, setInstances] = useState<AlertInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [emailTo, setEmailTo] = useState("");
+  const [hookFormat, setHookFormat] = useState("json");
+  const [testMsg, setTestMsg] = useState<string | null>(null);
   const [editing, setEditing] = useState<AlertRuleResponse | null>(null);
   const [form, setForm] = useState<CreateAlertRule & { id?: string }>({
     name: "",
@@ -60,6 +75,7 @@ export default function AlertRulesManager() {
       webhook_url: form.webhook_url || null,
     };
     try {
+      let ruleId = form.id;
       if (editing && form.id) {
         await api.updateAlertRule(form.id, {
           name: form.name,
@@ -72,7 +88,14 @@ export default function AlertRulesManager() {
           webhook_url: form.webhook_url || null,
         });
       } else {
-        await api.createAlertRule(payload);
+        const created = (await api.createAlertRule(payload)) as unknown as { rule?: { id?: string }; id?: string };
+        ruleId = created?.rule?.id ?? created?.id;
+      }
+      if (ruleId) {
+        await fetch(`/api/v1/alerts/rules/${ruleId}/notify`, {
+          method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email_to: emailTo, webhook_format: hookFormat }),
+        });
       }
       setOpen(false);
       setEditing(null);
@@ -90,6 +113,26 @@ export default function AlertRulesManager() {
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to save rule");
     }
+  };
+
+  const openEdit = async (rule: AlertRuleResponse) => {
+    setEditing(rule);
+    setForm({ id: rule.id, name: rule.name, description: rule.description || "", condition_type: rule.condition_type, threshold: rule.threshold, severity: rule.severity, cooldown_minutes: rule.cooldown_minutes, enabled: rule.enabled, webhook_url: rule.webhook_url || "" });
+    setEmailTo(""); setHookFormat("json"); setTestMsg(null);
+    try {
+      const r = await fetch(`/api/v1/alerts/rules/${rule.id}/notify`, { credentials: "same-origin" });
+      if (r.ok) { const n = await r.json(); setEmailTo(n.email_to ?? ""); setHookFormat(n.webhook_format ?? "json"); }
+    } catch { /* defaults */ }
+    setOpen(true);
+  };
+
+  const sendTest = async (id: string) => {
+    setTestMsg("Sending test…");
+    try {
+      const r = await fetch(`/api/v1/alerts/rules/${id}/test`, { method: "POST", credentials: "same-origin" });
+      const b = await r.json();
+      setTestMsg((b.results ?? [b.error ?? `HTTP ${r.status}`]).join(" · "));
+    } catch (e) { setTestMsg((e as Error).message); }
   };
 
   const handleDelete = async (id: string) => {
@@ -117,7 +160,8 @@ export default function AlertRulesManager() {
     <Card className="p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-slate-100">Alert Rules</h2>
-        <Button onClick={() => { setEditing(null); setForm({ name: "", description: "", condition_type: "threat", threshold: "", severity: "medium", cooldown_minutes: 60, enabled: true, webhook_url: "" }); setOpen(true); }}>
+        {testMsg ? <p className="mb-2 text-xs text-sky-300">{testMsg}</p> : null}
+        <Button onClick={() => { setEmailTo(""); setHookFormat("json"); setEditing(null); setForm({ name: "", description: "", condition_type: "threat", threshold: "", severity: "medium", cooldown_minutes: 60, enabled: true, webhook_url: "" }); setOpen(true); }}>
           + Add Rule
         </Button>
       </div>
@@ -157,7 +201,8 @@ export default function AlertRulesManager() {
                 </td>
                 <td className="py-2 text-right">
                   <Button size="sm" onClick={() => handleDelete(rule.id)} variant="danger">Delete</Button>
-                  <Button size="sm" onClick={() => { setEditing(rule); setForm({ id: rule.id, name: rule.name, description: rule.description || "", condition_type: rule.condition_type, threshold: rule.threshold, severity: rule.severity, cooldown_minutes: rule.cooldown_minutes, enabled: rule.enabled, webhook_url: rule.webhook_url || "" }); setOpen(true); }} variant="secondary">Edit</Button>
+                  <Button size="sm" onClick={() => void sendTest(rule.id)} variant="secondary">Test</Button>
+                  <Button size="sm" onClick={() => void openEdit(rule)} variant="secondary">Edit</Button>
                 </td>
               </tr>
             ))}
@@ -222,14 +267,14 @@ export default function AlertRulesManager() {
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Condition Type</label>
-                <Select value={form.condition_type} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, condition_type: e.target.value as "threat" | "blocked_category" | "large_transfer" })}>
+                <Select value={form.condition_type} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, condition_type: e.target.value })}>
                   {CONDITION_TYPES.map((c) => (
                     <option key={c.value} value={c.value}>{c.label}</option>
                   ))}
                 </Select>
               </div>
               <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Threshold</label>
+                <label className="block text-[11px] text-slate-500 mb-1">Threshold <span className="text-slate-600">- {HINTS[form.condition_type] ?? ""}</span></label>
                 <Input type="number" value={form.threshold} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, threshold: e.target.value })} />
               </div>
               <div>
@@ -254,6 +299,17 @@ export default function AlertRulesManager() {
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Webhook URL</label>
                 <Input placeholder="https://hooks.example.com/alerts" value={form.webhook_url ?? ""} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, webhook_url: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-1">Webhook format</label>
+                <select className="w-full rounded-md border border-white/10 bg-black/30 px-2 py-1.5 text-sm text-slate-200" value={hookFormat} onChange={(e) => setHookFormat(e.target.value)}>
+                  <option value="json">Generic JSON</option>
+                  <option value="text">Chat text (Zulip, Slack, Mattermost: {"{"}"text": ...{"}"})</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-1">E-mail recipients (comma separated; needs SMTP_* in kira.env)</label>
+                <Input placeholder="soc@example.com, it@example.com" value={emailTo} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmailTo(e.target.value)} />
               </div>
               <div className="flex items-center justify-end gap-2">
                 <Button type="button" onClick={() => { setOpen(false); setEditing(null); }} variant="secondary">Cancel</Button>

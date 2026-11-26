@@ -207,6 +207,19 @@ def main():
     check("system health responds", st == 200 and hl.get("status") in ("ok", "warn", "error") and "diagnosis" in hl, f"{st}")
     check("system health sees recent events", st == 200 and hl.get("events_last_60m", 0) > 0, str(hl.get("events_last_60m")))
 
+    # ---- alert rules: new conditions, notification settings, test delivery
+    rid = None
+    st, rb = admin.call("POST", "/api/v1/alerts/rules", {"name": "e2e no logs", "condition_type": "no_logs", "threshold": "100000", "severity": "low"})
+    rid = ((rb or {}).get("rule") or {}).get("id") if st == 200 else None
+    check("alert rule with new condition is accepted", st == 200 and rid, f"{st} {str(rb)[:100]}")
+    check("unknown alert condition rejected", admin.call("POST", "/api/v1/alerts/rules", {"name": "bad", "condition_type": "nope", "threshold": "1"})[0] == 400)
+    if rid:
+        check("alert notify settings saved", admin.call("PUT", f"/api/v1/alerts/rules/{rid}/notify", {"email_to": "a@example.com", "webhook_format": "text"})[0] == 200)
+        st, nb = admin.call("GET", f"/api/v1/alerts/rules/{rid}/notify")
+        check("alert notify settings read back", st == 200 and nb.get("webhook_format") == "text" and nb.get("email_to") == "a@example.com", str(nb))
+        check("alert notify bad format rejected", admin.call("PUT", f"/api/v1/alerts/rules/{rid}/notify", {"webhook_format": "xml"})[0] == 400)
+        admin.call("DELETE", f"/api/v1/alerts/rules/{rid}")
+
     # ---- rate limiting last (it would lock this IP out)
     if not a.skip_ratelimit:
         t = Client(a.api)

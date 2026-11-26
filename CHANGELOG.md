@@ -6,6 +6,14 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.7.0]
+
+### Added
+- Alert rules are evaluated on the per-minute rollups (cheap, independent of the 6-hour raw-event retention).
+- New alert conditions: **no logs received** (collector/firewall silence), **single-user bandwidth**, **site visits** (`site:count`).
+- Notifications: e-mail recipients per rule (uses `SMTP_*`), webhook format `json` or `text` (Zulip, Slack, Mattermost: `{"text": ...}`), and a **Test** button that sends a test through the rule's channels.
+- `GET/PUT /api/v1/alerts/rules/{id}/notify`, `POST /api/v1/alerts/rules/{id}/test`.
+
 ## [0.6.0]
 
 ### Added

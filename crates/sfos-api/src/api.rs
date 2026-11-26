@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sfos_store::{
     AlertInstance, AlertRule, ReportResult, ReportSchedule, ReportTemplate, Store, Tenant,
-    WebhookDelivery,
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
@@ -48,7 +47,7 @@ impl ApiError {
             message: msg.into(),
         }
     }
-    fn not_found(msg: impl Into<String>) -> Self {
+    pub(crate) fn not_found(msg: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
             message: msg.into(),
@@ -1457,7 +1456,7 @@ pub async fn live_dashboards(
     })))
 }
 
-fn send_email(
+pub(crate) fn send_email(
     state: &AppState,
     to: &[String],
     subject: &str,
@@ -1546,44 +1545,6 @@ fn send_email(
         .map_err(|e| ApiError::internal(anyhow::anyhow!("failed to send email: {e}")))?;
 
     Ok(())
-}
-
-async fn send_webhook(
-    _state: &AppState,
-    url: &str,
-    rule_name: &str,
-    message: &str,
-    severity: &str,
-    triggered_at: DateTime<Utc>,
-) -> Result<(u16, String), ApiError> {
-    let payload = serde_json::json!({
-        "rule_name": rule_name,
-        "message": message,
-        "severity": severity,
-        "triggered_at": triggered_at.to_rfc3339(),
-    });
-
-    let client = reqwest::Client::new();
-    let res = client
-        .post(url)
-        .json(&payload)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| ApiError::internal(anyhow::anyhow!("webhook request failed: {e}")))?;
-
-    let status = res.status().as_u16();
-    let body = res.text().await.unwrap_or_default();
-
-    if (200..300).contains(&status) {
-        Ok((status, body))
-    } else {
-        Err(ApiError::internal(anyhow::anyhow!(
-            "webhook returned status {}: {}",
-            status,
-            body
-        )))
-    }
 }
 
 // Report schedule handlers
@@ -2195,11 +2156,11 @@ pub async fn create_alert_rule(
     Json(payload): Json<CreateAlertRule>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let tenant = resolve_tenant(&state, None).await?;
-    if !["threat", "blocked_category", "large_transfer"].contains(&payload.condition_type.as_str())
-    {
-        return Err(ApiError::bad_request(
-            "condition_type must be threat, blocked_category, or large_transfer",
-        ));
+    if !crate::alerts::CONDITIONS.contains(&payload.condition_type.as_str()) {
+        return Err(ApiError::bad_request(format!(
+            "condition_type must be one of {}",
+            crate::alerts::CONDITIONS.join(", ")
+        )));
     }
     if !["low", "medium", "high", "critical"]
         .contains(&payload.severity.as_deref().unwrap_or("medium"))
@@ -2706,72 +2667,15 @@ pub async fn evaluate_alert_rules(
             }
         }
 
-        let (condition_met, message, _event_count) = match rule.condition_type.as_str() {
-            "threat" => {
-                let threshold: i64 = rule.threshold.parse().unwrap_or(1);
-                let row = client.query_one(
-                    "SELECT count(*)::bigint AS cnt FROM events WHERE tenant_id = $1 AND category_group = 'threat' AND ts >= $2 AND ts < $3",
-                    &[&tenant_id, &(now - Duration::hours(1)), &now],
-                ).await?;
-                let cnt: i64 = row.get("cnt");
-                if cnt >= threshold {
-                    (
-                        true,
-                        format!(
-                            "{} threat events detected in the last hour (threshold: {})",
-                            cnt, threshold
-                        ),
-                        cnt,
-                    )
-                } else {
-                    (false, String::new(), 0)
-                }
+        let message = match crate::alerts::check(&client, tenant_id, rule, now).await {
+            Ok(Some(m)) => m,
+            Ok(None) => continue,
+            Err(e) => {
+                tracing::error!(rule = %rule.name, %e, "alert condition check failed");
+                continue;
             }
-            "blocked_category" => {
-                let parts: Vec<&str> = rule.threshold.split(':').collect();
-                let category = parts.first().copied().unwrap_or("");
-                let threshold: i64 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
-                let row = client.query_one(
-                    "SELECT count(*)::bigint AS cnt FROM events WHERE tenant_id = $1 AND action = 'blocked' AND category = $2 AND ts >= $3 AND ts < $4",
-                    &[&tenant_id, &category, &(now - Duration::hours(1)), &now],
-                ).await?;
-                let cnt: i64 = row.get("cnt");
-                if cnt >= threshold {
-                    (
-                        true,
-                        format!(
-                            "{} blocked events for category '{}' in the last hour (threshold: {})",
-                            cnt, category, threshold
-                        ),
-                        cnt,
-                    )
-                } else {
-                    (false, String::new(), 0)
-                }
-            }
-            "large_transfer" => {
-                let threshold: i64 = rule.threshold.parse().unwrap_or(1000000);
-                let row = client.query_one(
-                    "SELECT COALESCE(sum(sent_bytes + recv_bytes), 0)::bigint AS total FROM events WHERE tenant_id = $1 AND ts >= $2 AND ts < $3",
-                    &[&tenant_id, &(now - Duration::hours(1)), &now],
-                ).await?;
-                let total: i64 = row.get("total");
-                if total >= threshold {
-                    (
-                        true,
-                        format!(
-                            "Total transfer {} bytes in the last hour exceeds threshold {}",
-                            total, threshold
-                        ),
-                        total,
-                    )
-                } else {
-                    (false, String::new(), 0)
-                }
-            }
-            _ => continue,
         };
-
+        let condition_met = true;
         if condition_met {
             let instance = AlertInstance {
                 id: Uuid::new_v4(),
@@ -2790,50 +2694,7 @@ pub async fn evaluate_alert_rules(
                 .update_alert_rule_last_triggered(rule.id, now)
                 .await?;
 
-            // Send webhook if configured
-            if let Some(webhook_url) = &rule.webhook_url {
-                let state_clone = state.clone();
-                let instance_id = created_instance.id;
-                let url = webhook_url.clone();
-                let msg = instance.message.clone();
-                let sev = rule.severity.clone();
-                let rname = rule.name.clone();
-                tokio::spawn(async move {
-                    let (status, response_status_code, response_body, error_message) =
-                        match send_webhook(&state_clone, &url, &rname, &msg, &sev, now).await {
-                            Ok((resp_status, resp_body)) => (
-                                "sent".to_string(),
-                                Some(resp_status as i32),
-                                Some(resp_body),
-                                None,
-                            ),
-                            Err(e) => {
-                                tracing::error!(webhook_url = %url, %e, "webhook delivery failed");
-                                let err_str = e.to_string();
-                                // Try to extract status code from error message
-                                let status_code = err_str
-                                    .strip_prefix("internal server error: ")
-                                    .and_then(|s| s.strip_prefix("webhook returned status "))
-                                    .and_then(|s| s.split(':').next())
-                                    .and_then(|s| s.trim().parse::<i32>().ok());
-                                ("failed".to_string(), status_code, None, Some(err_str))
-                            }
-                        };
-                    let _ = state_clone
-                        .store
-                        .create_webhook_delivery(&WebhookDelivery {
-                            id: Uuid::new_v4(),
-                            alert_instance_id: instance_id,
-                            webhook_url: url,
-                            status,
-                            response_status_code,
-                            response_body,
-                            error_message,
-                            delivered_at: now,
-                        })
-                        .await;
-                });
-            }
+            crate::alerts::notify(state, rule, created_instance.id, &message, now);
         }
     }
 
