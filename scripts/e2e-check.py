@@ -229,6 +229,15 @@ def main():
     admin.call("PUT", "/api/v1/settings", {"mask_users": False})
     check("metrics endpoint disabled without METRICS_TOKEN", admin.raw("GET", "/metrics")[0] == 404)
 
+    # ---- hardening: headers and audit log
+    with admin.op.open(admin.base + "/", timeout=20) as r:
+        hdrs = {k.lower() for k in r.headers.keys()}
+    check("security headers present", "content-security-policy" in hdrs and "x-content-type-options" in hdrs and "x-frame-options" in hdrs)
+    st, au = admin.call("GET", "/api/v1/audit?limit=10")
+    check("admin can read the audit log", st == 200 and len(au.get("items", [])) >= 1, str(st))
+    st, csv_ = admin.raw("GET", "/api/v1/audit?limit=10&format=csv")
+    check("audit log exports as CSV", st == 200 and csv_.startswith(b"time,user"), str(st))
+
     # ---- rate limiting last (it would lock this IP out)
     if not a.skip_ratelimit:
         t = Client(a.api)

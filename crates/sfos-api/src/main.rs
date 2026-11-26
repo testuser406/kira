@@ -203,6 +203,7 @@ async fn main() -> Result<()> {
             get(settings::get_settings).put(settings::put_settings),
         )
         .route("/metrics", get(system::prometheus))
+        .route("/api/v1/audit", get(settings::audit))
         .route("/api/v1/reports/summary", get(summary::summary_report))
         .route("/api/v1/productivity/summary", get(productivity::summary))
         .route(
@@ -313,6 +314,7 @@ async fn main() -> Result<()> {
             auth::require_auth,
         ))
         .layer(CompressionLayer::new())
+        .layer(axum::middleware::from_fn(settings::security_headers))
         .with_state(state);
 
     let listener = TcpListener::bind(addr)

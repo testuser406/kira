@@ -148,3 +148,20 @@ jobs:
         if: failure()
         shell: pwsh
         run: Get-ChildItem .runtime\logs\*.log | ForEach-Object { "=== $($_.Name)"; Get-Content $_ -Tail 60 }
+
+  audit:
+    name: Dependency audit (informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm audit (production dependencies)
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit

@@ -97,3 +97,90 @@ pub async fn put_settings(
     }
     Ok(Json(json!({ "ok": true })))
 }
+
+/// Baseline browser hardening for every response.
+pub async fn security_headers(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let mut res = next.run(req).await;
+    let h = res.headers_mut();
+    for (k, v) in [
+        ("content-security-policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"),
+        ("x-content-type-options", "nosniff"),
+        ("x-frame-options", "DENY"),
+        ("referrer-policy", "no-referrer"),
+        ("permissions-policy", "camera=(), microphone=(), geolocation=()"),
+    ] {
+        h.insert(k, axum::http::HeaderValue::from_static(v));
+    }
+    res
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuditQuery {
+    pub limit: Option<i64>,
+    pub format: Option<String>,
+}
+
+/// Recent audit entries (administrators only; JSON or CSV).
+pub async fn audit(
+    State(state): State<AppState>,
+    axum::Extension(cu): axum::Extension<CurrentUser>,
+    axum::extract::Query(q): axum::extract::Query<AuditQuery>,
+) -> Result<axum::response::Response, ApiError> {
+    use axum::response::IntoResponse;
+    if cu.0.role != "admin" {
+        return Ok((
+            axum::http::StatusCode::FORBIDDEN,
+            Json(json!({"error": "administrator role required"})),
+        )
+            .into_response());
+    }
+    let limit = q.limit.unwrap_or(200).clamp(1, 5000);
+    let client = state.store.pool().get().await?;
+    let rows = client
+        .query(
+            "SELECT ts, username, action, detail, ip FROM audit_log ORDER BY ts DESC LIMIT $1",
+            &[&limit],
+        )
+        .await?;
+    let items: Vec<Value> = rows
+        .iter()
+        .map(|r| json!({"ts": r.get::<_, chrono::DateTime<chrono::Utc>>(0), "user": r.get::<_, Option<String>>(1), "action": r.get::<_, String>(2), "detail": r.get::<_, Option<String>>(3), "ip": r.get::<_, Option<String>>(4)}))
+        .collect();
+    if q.format.as_deref() == Some("csv") {
+        let esc = |s: &str| {
+            let s = if s.starts_with(['=', '+', '-', '@']) {
+                format!("'{s}")
+            } else {
+                s.to_string()
+            };
+            format!("\"{}\"", s.replace('"', "\"\""))
+        };
+        let mut out = String::from("time,user,action,detail,ip\n");
+        for i in &items {
+            out.push_str(&format!(
+                "{},{},{},{},{}\n",
+                esc(i["ts"].as_str().unwrap_or("")),
+                esc(i["user"].as_str().unwrap_or("")),
+                esc(i["action"].as_str().unwrap_or("")),
+                esc(i["detail"].as_str().unwrap_or("")),
+                esc(i["ip"].as_str().unwrap_or(""))
+            ));
+        }
+        return Ok((
+            axum::http::StatusCode::OK,
+            [
+                ("content-type", "text/csv; charset=utf-8"),
+                (
+                    "content-disposition",
+                    "attachment; filename=\"kira-audit.csv\"",
+                ),
+            ],
+            out,
+        )
+            .into_response());
+    }
+    Ok(Json(json!({ "items": items })).into_response())
+}

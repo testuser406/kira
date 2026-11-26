@@ -63,6 +63,35 @@ function PrivacySetting() {
   );
 }
 
+function AuditCard() {
+  const [rows, setRows] = useState<{ ts: string; user: string | null; action: string; detail: string | null; ip: string | null }[] | null>(null);
+  useEffect(() => {
+    fetch("/api/v1/audit?limit=25", { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).then((b) => setRows(b?.items ?? null)).catch(() => setRows(null));
+  }, []);
+  if (!rows) return null;
+  return (
+    <Card>
+      <CardHeader title="Audit log (administrators)" />
+      <div className="overflow-x-auto px-5 pb-4 pt-2">
+        <table className="w-full text-[12.5px]">
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className="border-t border-white/[0.04] text-slate-400">
+                <td className="whitespace-nowrap py-1.5 pr-3">{new Date(r.ts).toLocaleString()}</td>
+                <td className="pr-3 text-slate-300">{r.user ?? "-"}</td>
+                <td className="pr-3 text-slate-200">{r.action}</td>
+                <td className="max-w-[320px] truncate pr-3" title={r.detail ?? ""}>{r.detail ?? ""}</td>
+                <td>{r.ip ?? ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <a className="mt-2 inline-block text-xs text-sky-300 hover:underline" href="/api/v1/audit?limit=5000&format=csv">Export CSV</a>
+      </div>
+    </Card>
+  );
+}
+
 export function SystemPage() {
   const [h, setH] = useState<Health | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -125,6 +154,7 @@ export function SystemPage() {
             <p className="px-5 pb-4 text-xs text-slate-500">Database size {fmtBytes(h.database.size_bytes)} · for a full automatic check run <code className="text-sky-200">.\scripts\windows\kira.ps1 doctor</code></p>
           </Card>
           <PrivacySetting />
+          <AuditCard />
         </>
       ) : !err ? <Card><div className="p-8 text-sm text-slate-500">Checking…</div></Card> : null}
     </div>

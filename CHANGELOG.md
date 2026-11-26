@@ -6,6 +6,14 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [0.9.0]
+
+### Added
+- Security headers on every response (CSP, frame denial, nosniff, referrer and permissions policy).
+- Audit log viewer (System tab, administrators) and CSV export: `GET /api/v1/audit`.
+- `scripts/loadtest.py` synthetic syslog load generator, `docs/security.md` (HTTPS reverse proxy, network, secrets).
+- Informational CI job: `npm audit` and `cargo audit`.
+
 ## [0.8.0]
 
 ### Added
