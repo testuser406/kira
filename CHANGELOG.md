@@ -6,6 +6,14 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [1.0.0]
+
+### Added
+- **Report share links:** Reports tab > *Share link* creates an expiring (7 day) link to a PDF snapshot of the selected report; anyone with the link can open it without signing in. Masking is honoured; links can be revoked (`DELETE /api/v1/reports/share/{token}`), expired links are purged. Creation is audited.
+
+### Security
+- Updated `lettre` (0.11.24, SMTP injection/DoS advisories), `url` and `ctutils`; documented the remaining `chrono` advisory (no fix released).
+
 ## [0.9.0]
 
 ### Added

@@ -199,6 +199,9 @@ async fn maintenance(
         if let Err(err) = store.drop_old_web_extracts().await {
             tracing::error!(%err, "failed to prune searches/videos");
         }
+        if let Err(err) = store.drop_old_shares().await {
+            tracing::error!(%err, "failed to prune report shares");
+        }
         if let Err(err) = store.drop_old_hourly().await {
             tracing::error!(%err, "failed to prune hourly activity");
         }

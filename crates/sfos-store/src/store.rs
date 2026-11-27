@@ -93,6 +93,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0023_settings",
         include_str!("../migrations/0023_settings.sql"),
     ),
+    (
+        "0024_report_shares",
+        include_str!("../migrations/0024_report_shares.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -879,6 +883,16 @@ impl Store {
             )
             .await?;
         Ok(a + b)
+    }
+
+    pub async fn drop_old_shares(&self) -> Result<u64> {
+        let client = self.pool.get().await?;
+        Ok(client
+            .execute(
+                "DELETE FROM report_shares WHERE expires_at < now() - interval '1 day'",
+                &[],
+            )
+            .await?)
     }
 
     pub async fn drop_old_hourly(&self) -> Result<u64> {

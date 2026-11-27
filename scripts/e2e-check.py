@@ -238,6 +238,18 @@ def main():
     st, csv_ = admin.raw("GET", "/api/v1/audit?limit=10&format=csv")
     check("audit log exports as CSV", st == 200 and csv_.startswith(b"time,user"), str(st))
 
+    # ---- share links
+    st, sh = admin.call("POST", "/api/v1/reports/share", {"type": "executive", "from": "24h", "format": "pdf", "days": 1})
+    check("share link created", st == 200 and sh.get("url", "").startswith("/share/"), f"{st} {sh}")
+    if st == 200:
+        anon = Client(admin.base)
+        st2, body2 = anon.raw("GET", sh["url"])
+        check("share link opens without signing in", st2 == 200 and body2.startswith(b"%PDF"), str(st2))
+        tok = sh["url"].rsplit("/", 1)[1]
+        admin.call("DELETE", f"/api/v1/reports/share/{tok}")
+        check("revoked share link stops working", anon.raw("GET", sh["url"])[0] == 404)
+    check("bad share token is 404", Client(admin.base).raw("GET", "/share/not-a-token")[0] == 404)
+
     # ---- rate limiting last (it would lock this IP out)
     if not a.skip_ratelimit:
         t = Client(a.api)

@@ -46,6 +46,7 @@ export function ReportsPage({ tenant }: { tenant: string }) {
   const [data, setData] = useState<Summary | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
 
   const qs = useCallback((format: string) => {
     const custom = range === "custom" && cFrom;
@@ -68,6 +69,20 @@ export function ReportsPage({ tenant }: { tenant: string }) {
   }, [qs, type, user]);
 
   useEffect(() => { if (type !== "user_overview" && (range !== "custom" || cFrom)) void run(); }, [type, range, top]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const share = async (format: string) => {
+    const p = new URLSearchParams(qs(format).split("?")[1]);
+    const body: Record<string, unknown> = { tenant, type, from: p.get("from"), top, format, days: 7 };
+    if (p.get("to")) body.to = p.get("to");
+    if (p.get("user")) body.user = p.get("user");
+    try {
+      const r = await fetch("/api/v1/reports/share", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(r.status === 403 ? "Administrator role required" : `HTTP ${r.status}`);
+      const b = await r.json();
+      setShareUrl(`${window.location.origin}${b.url}`);
+      setErr(null);
+    } catch (e) { setErr((e as Error).message); }
+  };
 
   const sel = "rounded-md border border-white/10 bg-black/30 px-2 py-1.5 text-sm text-slate-200";
   return (
@@ -111,9 +126,16 @@ export function ReportsPage({ tenant }: { tenant: string }) {
           <div className="ml-auto flex gap-2">
             <a className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/5" href={qs("pdf")}>Export PDF</a>
             <a className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/5" href={qs("csv")}>Export CSV</a>
+            <button type="button" onClick={() => void share("pdf")} className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/5">Share link</button>
           </div>
         </div>
         {err ? <p className="px-5 pb-3 text-sm text-rose-300">{err}</p> : null}
+        {shareUrl ? (
+          <p className="px-5 pb-3 text-xs text-slate-400">
+            PDF link (valid 7 days, anyone with the link can open it):{" "}
+            <input readOnly value={shareUrl} onFocus={(e) => e.currentTarget.select()} className="ml-1 w-[420px] max-w-full rounded border border-white/10 bg-black/30 px-2 py-1 text-slate-200" />
+          </p>
+        ) : null}
       </Card>
 
       {data ? (

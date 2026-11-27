@@ -6,6 +6,7 @@ mod productivity;
 mod query;
 mod report;
 mod settings;
+mod share;
 mod summary;
 mod system;
 
@@ -203,6 +204,12 @@ async fn main() -> Result<()> {
             get(settings::get_settings).put(settings::put_settings),
         )
         .route("/metrics", get(system::prometheus))
+        .route("/api/v1/reports/share", axum::routing::post(share::create))
+        .route(
+            "/api/v1/reports/share/{token}",
+            axum::routing::delete(share::revoke),
+        )
+        .route("/share/{token}", get(share::open))
         .route("/api/v1/audit", get(settings::audit))
         .route("/api/v1/reports/summary", get(summary::summary_report))
         .route("/api/v1/productivity/summary", get(productivity::summary))
