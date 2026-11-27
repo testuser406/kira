@@ -225,9 +225,10 @@ export default function ReportSchedulesManager() {
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">Format</label>
-                <Select value={form.format} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, format: e.target.value as "pdf" | "csv" })}>
+                <Select value={form.format} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setForm({ ...form, format: e.target.value as "pdf" | "csv" | "xlsx" })}>
                   <option value="pdf">PDF</option>
                   <option value="csv">CSV</option>
+                  <option value="xlsx">Excel (XLSX)</option>
                 </Select>
               </div>
               <div>

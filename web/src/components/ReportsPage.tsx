@@ -126,6 +126,7 @@ export function ReportsPage({ tenant }: { tenant: string }) {
           <div className="ml-auto flex gap-2">
             <a className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/5" href={qs("pdf")}>Export PDF</a>
             <a className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/5" href={qs("csv")}>Export CSV</a>
+            <a className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/5" href={qs("xlsx")}>Export Excel</a>
             <button type="button" onClick={() => void share("pdf")} className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/5">Share link</button>
           </div>
         </div>

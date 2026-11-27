@@ -6,6 +6,14 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [1.3.0]
+
+### Added
+- Excel (XLSX) export for every report: a Summary sheet plus one sheet per table, numbers stay numeric. Available from the Reports page, scheduled reports and share links (migration 0026).
+
+### Fixed
+- Scheduled reports sent by e-mail attached PDF files as lossy text, which corrupted them; attachments are now sent as raw bytes.
+
 ## [1.2.0]
 
 ### Performance

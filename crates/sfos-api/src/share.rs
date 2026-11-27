@@ -42,8 +42,8 @@ pub async fn create(
         return Err(ApiError::bad_request("unknown report type"));
     }
     let format = b.format.as_deref().unwrap_or("pdf");
-    if format != "pdf" && format != "csv" {
-        return Err(ApiError::bad_request("format must be pdf or csv"));
+    if !["pdf", "csv", "xlsx"].contains(&format) {
+        return Err(ApiError::bad_request("format must be pdf, csv or xlsx"));
     }
     let user = b
         .user

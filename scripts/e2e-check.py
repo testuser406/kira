@@ -194,6 +194,8 @@ def main():
     st, ex = admin.call("GET", "/api/v1/reports/summary?type=executive&from=1h")
     ev = next((k["value"] for k in ex.get("kpis", []) if k["label"] == "Total events"), 0) if st == 200 else 0
     check("executive summary counts ingested events", ev > 0, f"events={ev}")
+    st, xl = admin.raw("GET", "/api/v1/reports/summary?type=executive&from=24h&format=xlsx")
+    check("summary XLSX is a zip workbook", st == 200 and xl[:2] == b"PK" and b"xl/workbook.xml" in xl, f"{st} {len(xl)}")
     st, pdf = admin.raw("GET", "/api/v1/reports/summary?type=executive&from=24h&format=pdf")
     check("summary PDF is a small valid PDF", st == 200 and pdf.startswith(b"%PDF") and len(pdf) < 200_000, f"{st} {len(pdf)}")
     st, csv_ = admin.raw("GET", "/api/v1/reports/summary?type=online_productivity&from=24h&format=csv")

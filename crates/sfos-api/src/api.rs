@@ -1504,6 +1504,8 @@ pub(crate) fn send_email(
             .to_string();
         let mime_type = if file_name.ends_with(".pdf") {
             "application/pdf"
+        } else if file_name.ends_with(".xlsx") {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         } else {
             "text/csv"
         };
@@ -1518,7 +1520,7 @@ pub(crate) fn send_email(
             .header(lettre::message::header::ContentDisposition::attachment(
                 &file_name,
             ))
-            .body(String::from_utf8_lossy(&attachment_bytes).to_string());
+            .body(attachment_bytes); // raw bytes: PDF/XLSX must not be re-encoded as text
         builder
             .multipart(
                 lettre::message::MultiPart::mixed()
@@ -1579,7 +1581,7 @@ pub async fn create_report_schedule(
     Json(payload): Json<CreateReportSchedule>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let tenant = resolve_tenant(&state, None).await?;
-    if !["csv", "pdf"].contains(&payload.format.as_str()) {
+    if !["csv", "pdf", "xlsx"].contains(&payload.format.as_str()) {
         return Err(ApiError::bad_request("format must be csv or pdf"));
     }
     // Validate cron schedule and compute initial next_run
@@ -1809,6 +1811,8 @@ pub async fn download_report_result(
         "application/pdf"
     } else if file_path.ends_with(".csv") {
         "text/csv"
+    } else if file_path.ends_with(".xlsx") {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     } else {
         "application/octet-stream"
     };
@@ -1930,7 +1934,7 @@ pub async fn create_custom_report(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
     let format = payload.format.unwrap_or_else(|| "pdf".to_string());
-    if !["csv", "pdf"].contains(&format.as_str()) {
+    if !["csv", "pdf", "xlsx"].contains(&format.as_str()) {
         return Err(ApiError::bad_request("format must be csv or pdf"));
     }
     // If template_id is provided, merge template default_filters with payload filters
@@ -2031,7 +2035,7 @@ pub async fn update_custom_report(
         return Err(ApiError::not_found("custom report not found"));
     }
     let format = payload.format.unwrap_or(report.format);
-    if !["csv", "pdf"].contains(&format.as_str()) {
+    if !["csv", "pdf", "xlsx"].contains(&format.as_str()) {
         return Err(ApiError::bad_request("format must be csv or pdf"));
     }
     let updated = ReportSchedule {
@@ -2415,7 +2419,7 @@ pub async fn generate_report_on_demand(
     let tenant = resolve_tenant(&state, query.get("tenant").and_then(|v| v.as_str())).await?;
 
     let format = payload.format.unwrap_or_else(|| "pdf".to_string());
-    if !["csv", "pdf"].contains(&format.as_str()) {
+    if !["csv", "pdf", "xlsx"].contains(&format.as_str()) {
         return Err(ApiError::bad_request("format must be csv or pdf"));
     }
 

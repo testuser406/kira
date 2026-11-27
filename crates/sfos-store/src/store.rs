@@ -101,6 +101,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0025_more_default_categories",
         include_str!("../migrations/0025_more_default_categories.sql"),
     ),
+    (
+        "0026_xlsx_format",
+        include_str!("../migrations/0026_xlsx_format.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 

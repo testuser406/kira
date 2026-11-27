@@ -1561,11 +1561,228 @@ fn assemble(pages: &[String]) -> Vec<u8> {
     pdf
 }
 
+// ---------- XLSX ----------
+
+fn xml_esc(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        .collect::<String>()
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn xlsx_col(mut n: usize) -> String {
+    let mut s = String::new();
+    loop {
+        s.insert(0, (b'A' + (n % 26) as u8) as char);
+        if n < 26 {
+            break;
+        }
+        n = n / 26 - 1;
+    }
+    s
+}
+
+fn xlsx_cell(row: usize, col: usize, v: &Value, style: u8) -> String {
+    let r = format!("{}{}", xlsx_col(col), row + 1);
+    match v {
+        Value::Number(n) => format!("<c r=\"{r}\" s=\"{style}\"><v>{n}</v></c>"),
+        Value::Null => String::new(),
+        Value::String(x) => format!(
+            "<c r=\"{r}\" s=\"{style}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
+            xml_esc(x)
+        ),
+        o => format!(
+            "<c r=\"{r}\" s=\"{style}\" t=\"inlineStr\"><is><t>{}</t></is></c>",
+            xml_esc(&o.to_string())
+        ),
+    }
+}
+
+fn xlsx_sheet(rows: &[(Vec<Value>, u8)], widths: &[f64]) -> String {
+    let mut x = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">",
+    );
+    if !widths.is_empty() {
+        x.push_str("<cols>");
+        for (i, w) in widths.iter().enumerate() {
+            x.push_str(&format!(
+                "<col min=\"{0}\" max=\"{0}\" width=\"{1}\" customWidth=\"1\"/>",
+                i + 1,
+                w
+            ));
+        }
+        x.push_str("</cols>");
+    }
+    x.push_str("<sheetData>");
+    for (ri, (cells, style)) in rows.iter().enumerate() {
+        x.push_str(&format!("<row r=\"{}\">", ri + 1));
+        for (ci, v) in cells.iter().enumerate() {
+            x.push_str(&xlsx_cell(ri, ci, v, *style));
+        }
+        x.push_str("</row>");
+    }
+    x.push_str("</sheetData></worksheet>");
+    x
+}
+
+/// Excel workbook: a Summary sheet (title, period, KPIs) plus one sheet per table section.
+/// Numbers stay numeric so they can be sorted and charted; styles: 0 normal, 1 bold header, 2 title.
+pub fn render_xlsx(s: &Summary) -> Vec<u8> {
+    use std::io::Write;
+    let mut sheets: Vec<(String, String)> = Vec::new();
+    let mut used: Vec<String> = Vec::new();
+    let mut unique = |raw: &str| -> String {
+        let mut base: String = raw
+            .chars()
+            .map(|c| if "[]:*?/\\".contains(c) { ' ' } else { c })
+            .collect::<String>()
+            .trim()
+            .chars()
+            .take(28)
+            .collect();
+        if base.is_empty() {
+            base = "Sheet".into();
+        }
+        let mut name = base.clone();
+        let mut n = 2;
+        while used.iter().any(|u| u.eq_ignore_ascii_case(&name)) {
+            name = format!("{base} {n}");
+            n += 1;
+        }
+        used.push(name.clone());
+        name
+    };
+    let mut rows: Vec<(Vec<Value>, u8)> = vec![
+        (vec![Value::String(s.title.clone())], 2),
+        (
+            vec![Value::String(format!(
+                "{} to {} (UTC), generated {}",
+                s.from.format("%Y-%m-%d %H:%M"),
+                s.to.format("%Y-%m-%d %H:%M"),
+                s.generated.format("%Y-%m-%d %H:%M")
+            ))],
+            0,
+        ),
+        (vec![], 0),
+        (
+            vec![
+                Value::String("Metric".into()),
+                Value::String("Value".into()),
+                Value::String("Unit".into()),
+                Value::String("Change vs previous".into()),
+            ],
+            1,
+        ),
+    ];
+    for k in &s.kpis {
+        rows.push((
+            vec![
+                Value::String(k.label.clone()),
+                serde_json::Number::from_f64(k.value)
+                    .map(Value::Number)
+                    .unwrap_or(Value::Null),
+                Value::String(k.unit.to_string()),
+                k.delta
+                    .and_then(serde_json::Number::from_f64)
+                    .map(Value::Number)
+                    .unwrap_or(Value::Null),
+            ],
+            0,
+        ));
+    }
+    sheets.push((
+        unique("Summary"),
+        xlsx_sheet(&rows, &[34.0, 18.0, 12.0, 20.0]),
+    ));
+    for sec in &s.sections {
+        if sec.columns.is_empty() {
+            continue;
+        }
+        let mut r: Vec<(Vec<Value>, u8)> = vec![(
+            sec.columns
+                .iter()
+                .map(|c| {
+                    Value::String(match c.unit {
+                        "bytes" | "minutes" | "percent" => format!("{} ({})", c.name, c.unit),
+                        _ => c.name.clone(),
+                    })
+                })
+                .collect(),
+            1,
+        )];
+        for row in &sec.rows {
+            r.push((row.clone(), 0));
+        }
+        let widths: Vec<f64> = (0..sec.columns.len())
+            .map(|i| {
+                let longest = sec
+                    .rows
+                    .iter()
+                    .take(200)
+                    .filter_map(|row| row.get(i))
+                    .map(|v| v.as_str().map(|x| x.chars().count()).unwrap_or(12))
+                    .max()
+                    .unwrap_or(10)
+                    .max(sec.columns[i].name.chars().count());
+                (longest as f64 + 2.0).clamp(10.0, 60.0)
+            })
+            .collect();
+        sheets.push((unique(&sec.title), xlsx_sheet(&r, &widths)));
+    }
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut z = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        let mut put = |name: &str, body: &str| {
+            let _ = z.start_file(name, opts);
+            let _ = z.write_all(body.as_bytes());
+        };
+        let mut ct = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>");
+        let mut wb = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>");
+        let mut rels = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">");
+        for (i, (name, _)) in sheets.iter().enumerate() {
+            let n = i + 1;
+            ct.push_str(&format!("<Override PartName=\"/xl/worksheets/sheet{n}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"));
+            wb.push_str(&format!(
+                "<sheet name=\"{}\" sheetId=\"{n}\" r:id=\"rId{n}\"/>",
+                xml_esc(name)
+            ));
+            rels.push_str(&format!("<Relationship Id=\"rId{n}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{n}.xml\"/>"));
+        }
+        let sid = sheets.len() + 1;
+        rels.push_str(&format!("<Relationship Id=\"rId{sid}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>"));
+        ct.push_str("</Types>");
+        wb.push_str("</sheets></workbook>");
+        put("[Content_Types].xml", &ct);
+        put("_rels/.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>");
+        put("xl/workbook.xml", &wb);
+        put("xl/_rels/workbook.xml.rels", &rels);
+        put("xl/styles.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><fonts count=\"3\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font><font><b/><sz val=\"11\"/><name val=\"Calibri\"/></font><font><b/><sz val=\"16\"/><name val=\"Calibri\"/></font></fonts><fills count=\"3\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill><fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFDCE6F2\"/></patternFill></fill></fills><borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"3\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/><xf numFmtId=\"0\" fontId=\"1\" fillId=\"2\" borderId=\"0\" xfId=\"0\" applyFont=\"1\" applyFill=\"1\"/><xf numFmtId=\"0\" fontId=\"2\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\"/></cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles></styleSheet>");
+        for (i, (_, xml)) in sheets.iter().enumerate() {
+            put(&format!("xl/worksheets/sheet{}.xml", i + 1), xml);
+        }
+        let _ = z.finish();
+    }
+    buf.into_inner()
+}
+
 pub fn render(format: &str, s: &Summary) -> Result<(Vec<u8>, &'static str, &'static str), String> {
     match format {
         "csv" => Ok((render_csv(s), "text/csv; charset=utf-8", "csv")),
         "pdf" => Ok((render_pdf(s), "application/pdf", "pdf")),
-        other => Err(format!("unsupported format {other:?} (use csv or pdf)")),
+        "xlsx" => Ok((
+            render_xlsx(s),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xlsx",
+        )),
+        other => Err(format!(
+            "unsupported format {other:?} (use csv, xlsx or pdf)"
+        )),
     }
 }
 

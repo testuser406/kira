@@ -6,6 +6,7 @@ edition.workspace = true
 description = "Dashboard and reporting API for Sophos Firewall events"
 
 [dependencies]
+zip = { version = "2", default-features = false, features = ["deflate"] }
 sfos-core = { path = "../sfos-core" }
 sfos-store = { path = "../sfos-store" }
 anyhow.workspace = true
