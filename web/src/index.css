@@ -62,3 +62,12 @@ body {
 input[type="search"]::-webkit-search-cancel-button {
   filter: invert(0.6);
 }
+
+/* Light theme: inverts the dark UI; media and charts are re-inverted by hue rotation. */
+html.light {
+  filter: invert(0.93) hue-rotate(180deg);
+}
+html.light img,
+html.light video {
+  filter: invert(1) hue-rotate(180deg);
+}

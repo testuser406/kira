@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { Button, Card, Input } from "./ui";
 
 type Me = { username: string; role: "admin" | "viewer"; auth_disabled?: boolean };
@@ -175,6 +175,9 @@ function Account({ me, onClose, onSignedOut }: { me: Me; onClose: () => void; on
   );
 }
 
+export const SessionContext = createContext<{ me: Me; signOut: () => void; openAccount: () => void } | null>(null);
+export const useSession = () => useContext(SessionContext);
+
 /** Wraps the app: shows the sign-in page until a session exists, and a small account menu afterwards. */
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = checking, null = signed out
@@ -216,14 +219,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   if (me === undefined) return <div className="min-h-screen bg-[#070b14]" />;
   if (me === null) return <Login onDone={refresh} />;
   return (
-    <>
+    <SessionContext.Provider value={{ me, signOut, openAccount: () => setOpen(true) }}>
       {children}
-      <div className="fixed bottom-3 left-3 z-40 flex items-center gap-2 rounded-full border border-white/10 bg-[#0b1220]/90 px-3 py-1.5 text-[11px] text-slate-400 backdrop-blur">
-        <span>{me.auth_disabled ? "Auth disabled" : `${me.username} · ${me.role}`}</span>
-        <button className="text-emerald-300 hover:underline" onClick={() => setOpen(true)}>Account</button>
-        {!me.auth_disabled && <button className="text-slate-300 hover:underline" onClick={signOut}>Sign out</button>}
-      </div>
       {open && <Account me={me} onClose={() => setOpen(false)} onSignedOut={signOut} />}
-    </>
+    </SessionContext.Provider>
   );
 }

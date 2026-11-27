@@ -6,6 +6,15 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [1.1.0]
+
+### Changed
+- New enterprise layout: grouped left sidebar (Monitoring, Reporting, Investigation, Alerting, Administration), collapsible, with its own page for every dashboard; breadcrumb top bar; mobile off-canvas menu. Pages are linkable (`#/reports`).
+- Alert rules, scheduled reports, custom reports, event explorer and data retention moved from the bottom of one long page to their own pages.
+- Proper user menu in the top bar (account and password, theme, sign out) replacing the floating chip that overlapped content.
+- Light theme (beta) switchable from the user menu; sidebar state and theme are remembered.
+- Overview data is only fetched on the pages that need it.
+
 ## [1.0.1]
 
 ### Fixed
