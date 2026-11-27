@@ -6,6 +6,14 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [1.0.1]
+
+### Fixed
+- UDP syslog socket now requests a large receive buffer (`UDP_RCVBUF_MB`, default 32; the effective size is logged and a warning shows if the OS caps it too low).
+- Default ingest queue raised to 100,000 events (`QUEUE_CAPACITY`) so bursts are absorbed while a batch is being written.
+- Default productivity guidelines now include more real Sophos categories (General Business, Computing & Internet, Web Hosting, Reference, CDNs, Advertisements).
+- `scripts/loadtest.py` uses the current time so generated data shows up in reports.
+
 ## [1.0.0]
 
 ### Added

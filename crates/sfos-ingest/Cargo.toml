@@ -6,6 +6,7 @@ edition.workspace = true
 description = "Syslog collector and normalizer for Sophos Firewall"
 
 [dependencies]
+socket2 = "0.5"
 sfos-core = { path = "../sfos-core" }
 sfos-store = { path = "../sfos-store" }
 anyhow.workspace = true

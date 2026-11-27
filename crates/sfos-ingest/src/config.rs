@@ -57,7 +57,7 @@ impl Config {
             batch_size: env_parse::<usize>("BATCH_SIZE", 5_000)?.clamp(1, 10_000),
             batch_ms: env_parse::<u64>("BATCH_MS", 2_000)?.clamp(50, 60_000),
             partitions_ahead_hours: env_parse("PARTITIONS_AHEAD_HOURS", 48)?.clamp(1, 168),
-            queue_capacity: env_parse::<usize>("QUEUE_CAPACITY", 20_000)?.clamp(100, 1_000_000),
+            queue_capacity: env_parse::<usize>("QUEUE_CAPACITY", 100_000)?.clamp(100, 1_000_000),
             max_line: env_parse::<usize>("MAX_LINE", 64 * 1024)?.clamp(1024, 10 * 1024 * 1024),
             maintenance_interval_secs: env_parse::<u64>("MAINTENANCE_INTERVAL_SECS", 300)?
                 .clamp(60, 86400),

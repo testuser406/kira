@@ -3,9 +3,9 @@
 
     python scripts/loadtest.py --host 127.0.0.1 --port 5514 --eps 2000 --seconds 20
 """
-import argparse, random, socket, time
+import argparse, datetime, random, socket, time
 
-TEMPLATE = ('date=2026-01-01 time=00:00:00 timezone="UTC" device_name="SFW" log_id=010101600001 log_type="Content Filtering" '
+TEMPLATE = ('date={date} time={time} timezone="UTC" device_name="SFW" log_id=010101600001 log_type="Content Filtering" '
             'log_component="HTTP" log_subtype="Allowed" status="Allowed" user_name="load{user}" src_ip=10.{a}.{b}.{c} '
             'dst_ip=93.184.{d}.{e} protocol="TCP" src_port={sp} dst_port=80 url="http://site{site}.example.com/page" '
             'domain="site{site}.example.com" category="General Business" sent_bytes={sb} recv_bytes={rb}')
@@ -21,7 +21,8 @@ def main():
     while time.time() - start < a.seconds:
         tick = time.time()
         for _ in range(a.eps // 10):
-            msg = TEMPLATE.format(user=random.randint(1, 300), a=random.randint(0, 3), b=random.randint(0, 255), c=random.randint(1, 254),
+            now = datetime.datetime.now(datetime.timezone.utc)
+            msg = TEMPLATE.format(date=now.strftime('%Y-%m-%d'), time=now.strftime('%H:%M:%S'), user=random.randint(1, 300), a=random.randint(0, 3), b=random.randint(0, 255), c=random.randint(1, 254),
                                   d=random.randint(0, 255), e=random.randint(1, 254), sp=random.randint(1024, 65000),
                                   site=random.randint(1, 400), sb=random.randint(100, 5000), rb=random.randint(100, 500000))
             s.sendto(msg.encode(), (a.host, a.port)); sent += 1

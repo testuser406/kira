@@ -97,6 +97,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0024_report_shares",
         include_str!("../migrations/0024_report_shares.sql"),
     ),
+    (
+        "0025_more_default_categories",
+        include_str!("../migrations/0025_more_default_categories.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 

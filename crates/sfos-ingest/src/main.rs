@@ -73,8 +73,7 @@ async fn main() -> Result<()> {
     let metrics: SharedMetrics = Arc::new(Metrics::default());
     let (tx, rx) = mpsc::channel(cfg.queue_capacity);
 
-    let udp = UdpSocket::bind(cfg.udp_addr)
-        .await
+    let udp = bind_udp(cfg.udp_addr)
         .with_context(|| format!("cannot bind UDP syslog socket on {}", cfg.udp_addr))?;
     let tcp = TcpListener::bind(cfg.tcp_addr)
         .await
@@ -267,4 +266,28 @@ async fn shutdown_signal() {
         _ = ctrl_c => {},
         _ = terminate => {},
     }
+}
+
+/// Bind the syslog UDP socket with a large receive buffer so bursts are not dropped by the OS
+/// (`UDP_RCVBUF_MB`, default 32; the OS may cap it, the effective size is logged).
+fn bind_udp(addr: std::net::SocketAddr) -> anyhow::Result<UdpSocket> {
+    use socket2::{Domain, Socket, Type};
+    let mb: usize = std::env::var("UDP_RCVBUF_MB")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(32);
+    let socket = Socket::new(Domain::for_address(addr), Type::DGRAM, None)?;
+    let _ = socket.set_recv_buffer_size(mb * 1024 * 1024);
+    socket.bind(&addr.into())?;
+    socket.set_nonblocking(true)?;
+    let effective = socket.recv_buffer_size().unwrap_or(0);
+    if effective < 4 * 1024 * 1024 {
+        tracing::warn!(
+            effective_kb = effective / 1024,
+            "UDP receive buffer is small; bursts may be dropped (raise net.core.rmem_max on Linux)"
+        );
+    } else {
+        tracing::info!(effective_mb = effective / 1024 / 1024, "UDP receive buffer");
+    }
+    Ok(UdpSocket::from_std(socket.into())?)
 }
