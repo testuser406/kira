@@ -188,8 +188,26 @@ switch ($Command) {
             }
         }
 
-        Start-KiraProcess 'ingest' $ingest 'ingest'
-        Start-Sleep -Seconds 2
+        # The collector must really be up (metrics answer), not merely started: retry and show why it died.
+        $hp = if ($cfg['HEALTH_ADDR']) { ($cfg['HEALTH_ADDR'] -split ':')[-1] } else { '8081' }
+        for ($try = 1; $try -le 3; $try++) {
+            Start-KiraProcess 'ingest' $ingest 'ingest'
+            $up = $false
+            for ($i = 0; $i -lt 40; $i++) {
+                Start-Sleep -Milliseconds 500
+                try { Invoke-RestMethod "http://127.0.0.1:$hp/metrics" -TimeoutSec 2 | Out-Null; $up = $true; break } catch { }
+                $pidFile = Join-Path $Pids 'ingest.pid'
+                $alive = (Test-Path $pidFile) -and (Get-Process -Id ([int](Get-Content $pidFile -Raw)) -ErrorAction SilentlyContinue)
+                if (-not $alive) { break }
+            }
+            if ($up) { break }
+            Write-Warning "Collector did not come up (attempt $try of 3). Last lines of .runtime\logs\ingest.err.log:"
+            $errLog = Join-Path $Logs 'ingest.err.log'
+            if (Test-Path $errLog) { Get-Content $errLog -Tail 8 | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow } }
+            Stop-KiraProcess 'ingest'
+            Start-Sleep -Seconds 3
+        }
+        if (-not $up) { Write-Warning 'The collector could not be started. Fix the error above, then run start again.' }
         Start-KiraProcess 'api' $api 'api'
 
         $healthPort = ($env:API_ADDR -split ':')[-1]
@@ -255,13 +273,6 @@ switch ($Command) {
         $udp = $null
         for ($w = 0; $w -lt 6 -and -not $udp; $w++) { $udp = Get-NetUDPEndpoint -LocalPort ([int]$sysPort) -ErrorAction SilentlyContinue; if (-not $udp) { Start-Sleep -Seconds 2 } }
         if ($udp) { Ok "UDP $sysPort is listening (PID $(($udp | Select-Object -First 1).OwningProcess))" } else { Bad "UDP $sysPort is not listening" 'start Kira, or another program may own the port: Get-NetUDPEndpoint -LocalPort 5514' }
-        try {
-            $line = netstat -s -p udp 2>$null | Select-String 'Receive Errors'
-            if ($line) {
-                $n = [int64](($line.ToString() -split '=')[-1].Trim())
-                if ($n -gt 0) { Bad "Windows reports $n UDP receive errors (datagrams dropped, buffer full)" 'raise UDP_RCVBUF_MB in kira.env and restart, or send syslog over TCP from Sophos' } else { Ok 'No UDP receive errors reported by Windows' }
-            }
-        } catch { }
         $tcp = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
         if ($tcp) { Ok 'Dashboard TCP 8080 is listening' } else { Bad 'Dashboard TCP 8080 is not listening' 'start Kira and check .runtime\logs\api.err.log' }
 
@@ -276,7 +287,14 @@ switch ($Command) {
 
         Write-Host "`n4. Is data arriving? (two samples, 10 s apart)"
         $m1 = $null; $m2 = $null
+        function Get-UdpErrors { try { $l = netstat -s -p udp 2>$null | Select-String 'Receive Errors'; if ($l) { return [int64](($l.ToString() -split '=')[-1].Trim()) } } catch { }; return $null }
+        $u1 = Get-UdpErrors
         try { $m1 = Invoke-RestMethod "http://127.0.0.1:$hp/metrics" -TimeoutSec 3; Start-Sleep -Seconds 10; $m2 = Invoke-RestMethod "http://127.0.0.1:$hp/metrics" -TimeoutSec 3 } catch { Bad 'collector metrics unavailable (collector not running?)' 'run: .\scripts\windows\kira.ps1 start' }
+        $u2 = Get-UdpErrors
+        if ($m2 -and $null -ne $u1 -and $null -ne $u2) {
+            # The Windows counter is cumulative since boot for ALL programs, so only growth during the test matters.
+            if (($u2 - $u1) -gt 0) { Bad ("Windows dropped {0} UDP datagrams in the last 10 s (receive buffer full)" -f ($u2 - $u1)) 'raise UDP_RCVBUF_MB in kira.env and restart, or send syslog over TCP from Sophos' } else { Ok 'No UDP datagrams dropped by Windows during the test' }
+        }
         if ($m2) {
             Write-Host ("  datagrams={0} parsed={1} rejected={2} denied_sources={3} written={4} db_errors={5} dropped={6} queue={7}%" -f $m2.datagrams, $m2.parsed, $m2.rejected, $m2.denied_sources, $m2.written, $m2.db_errors, $m2.dropped, [math]::Round($m2.queue_utilization_percent))
             if ($m2.datagrams -eq 0 -and $m2.lines -eq 0) { Bad 'Nothing has ever reached the collector' "check firewall rules above, the Sophos syslog server entry (this PC's IP, port $sysPort, UDP, 'Device standard'), and that logging is enabled on the firewall rules" }

@@ -6,6 +6,16 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [1.4.0]
+
+### Added
+- Search & Timeline page and a search box in the top bar: find any user, host, site, domain, application, category, firewall rule, country, subnet, threat or VPN user across up to 400 days. Opening a user shows a timeline (allowed/blocked over time), totals, browse time, top sites and top categories. Masked accounts cannot search user names or open timelines.
+- The overview traffic chart is now a filled area chart like the live dashboards.
+
+### Fixed
+- Windows doctor: the "UDP receive errors" check compared the cumulative, system-wide Windows counter and reported false alarms (tens of millions since boot). It now reports only datagrams dropped during the 10-second test.
+- A first `kira.ps1 start` could leave the collector dead (UDP 5514 not listening) until `doctor -Fix` started it again. The collector now retries its database connection for a minute instead of exiting, and `start` waits for the collector to answer, retries up to 3 times and prints the error log if it still fails.
+
 ## [1.3.0]
 
 ### Added

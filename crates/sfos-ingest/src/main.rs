@@ -36,19 +36,35 @@ async fn main() -> Result<()> {
         "starting Sophos syslog collector"
     );
 
-    let store = Store::connect_with_password(
-        &cfg.database_url,
-        cfg.database_password.as_deref(),
-        cfg.db_pool_size,
-    )?;
-    store.migrate().await.context("database migration failed")?;
-
-    let default_tenant = store
-        .ensure_tenant(&cfg.tenant_slug, &cfg.tenant_name)
-        .await?;
-    store
-        .initialize_global_retention(cfg.retention_hours)
-        .await?;
+    // The database may still be starting (or migrating from the API) when Kira starts:
+    // retry for a minute instead of exiting, so a first `start` always ends with a running collector.
+    let init = || async {
+        let store = Store::connect_with_password(
+            &cfg.database_url,
+            cfg.database_password.as_deref(),
+            cfg.db_pool_size,
+        )?;
+        store.migrate().await.context("database migration failed")?;
+        let default_tenant = store
+            .ensure_tenant(&cfg.tenant_slug, &cfg.tenant_name)
+            .await?;
+        store
+            .initialize_global_retention(cfg.retention_hours)
+            .await?;
+        Ok::<_, anyhow::Error>((store, default_tenant))
+    };
+    let mut attempt = 0u32;
+    let (store, default_tenant) = loop {
+        match init().await {
+            Ok(v) => break v,
+            Err(err) if attempt < 30 => {
+                attempt += 1;
+                tracing::warn!(attempt, error = %format!("{err:#}"), "database not ready, retrying in 2 s");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            Err(err) => return Err(err),
+        }
+    };
     let retention_hours = store.global_retention_hours().await?;
     let mut entries = Vec::new();
     for (net, slug) in &cfg.tenant_map {

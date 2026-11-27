@@ -1,6 +1,7 @@
 mod alerts;
 mod api;
 mod auth;
+mod investigate;
 mod live;
 mod productivity;
 mod query;
@@ -212,6 +213,8 @@ async fn main() -> Result<()> {
         .route("/share/{token}", get(share::open))
         .route("/api/v1/audit", get(settings::audit))
         .route("/api/v1/reports/summary", get(summary::summary_report))
+        .route("/api/v1/search", get(investigate::search))
+        .route("/api/v1/investigate/user", get(investigate::user_timeline))
         .route("/api/v1/productivity/summary", get(productivity::summary))
         .route(
             "/api/v1/productivity/guidelines",

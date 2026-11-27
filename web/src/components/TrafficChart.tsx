@@ -1,7 +1,7 @@
 import {
   CartesianGrid,
-  Line,
-  LineChart,
+  Area,
+  AreaChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -98,7 +98,15 @@ export function TrafficChart({
       ) : (
         <div className="mt-3 h-[268px] w-full pr-3">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={series} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
+            <AreaChart data={series} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
+              <defs>
+                {[["tc_down", "#22d3ee"], ["tc_up", "#a78bfa"], ["tc_ok", "#34d399"], ["tc_bad", "#fb7185"]].map(([id, c]) => (
+                  <linearGradient key={id} id={id} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={c} stopOpacity={0.35} />
+                    <stop offset="100%" stopColor={c} stopOpacity={0.02} />
+                  </linearGradient>
+                ))}
+              </defs>
               <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="t"
@@ -122,48 +130,56 @@ export function TrafficChart({
               />
               {volume ? (
                 <>
-                  <Line
-                    type="linear"
+                  <Area
+                    type="monotone"
                     dataKey="bytes_down"
+                    fill="url(#tc_down)"
                     name="Downloaded"
                     stroke="#22d3ee"
-                    strokeWidth={1.6}
+                    strokeWidth={1.8}
                     isAnimationActive={false}
                     dot={false}
+                    activeDot={{ r: 3 }}
                   />
-                  <Line
-                    type="linear"
+                  <Area
+                    type="monotone"
                     dataKey="bytes_up"
+                    fill="url(#tc_up)"
                     name="Uploaded"
                     stroke="#a78bfa"
-                    strokeWidth={1.6}
+                    strokeWidth={1.8}
                     isAnimationActive={false}
                     dot={false}
+                    activeDot={{ r: 3 }}
                   />
                 </>
               ) : (
                 <>
-                  <Line
-                    type="linear"
+                  <Area
+                    type="monotone"
                     dataKey="allowed"
+                    fill="url(#tc_ok)"
                     name="Allowed"
                     stroke="#34d399"
-                    strokeWidth={1.6}
+                    strokeWidth={1.8}
                     isAnimationActive={false}
                     dot={false}
+                    activeDot={{ r: 3 }}
                   />
-                  <Line
-                    type="linear"
+                  <Area
+                    type="monotone"
                     dataKey="blocked"
+                    fill="url(#tc_bad)"
                     name="Blocked"
                     stroke="#fb7185"
-                    strokeWidth={1.6}
+                    strokeWidth={1.8}
                     isAnimationActive={false}
                     dot={false}
+                    activeDot={{ r: 3 }}
                   />
                 </>
               )}
-            </LineChart>
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       )}

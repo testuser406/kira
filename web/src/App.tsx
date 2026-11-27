@@ -18,7 +18,8 @@ import AlertRulesManager from "./components/AlertRulesManager";
 import ReportSchedulesManager from "./components/ReportSchedulesManager";
 import CustomReportsManager from "./components/CustomReportsManager";
 import { Card, Skeleton, Spinner } from "./components/ui";
-import { ALL_ITEMS, Icon, Sidebar, UserMenu, usePage, useTheme } from "./components/Shell";
+import { ALL_ITEMS, Icon, Sidebar, UserMenu, hashQuery, usePage, useTheme } from "./components/Shell";
+import { SearchPage } from "./components/SearchPage";
 
 const RANGES = [
   { id: "1h", label: "1h", hours: 1 },
@@ -188,6 +189,8 @@ export default function App() {
       case "productivity_report": return <Suspense fallback={null}><ProductivityPage tenant={tenant} /></Suspense>;
       case "bandwidth": case "productivity": case "security": case "vpn":
         return <Suspense fallback={null}><LiveMinuteView kind={page as LiveKind} tenant={tenant} /></Suspense>;
+      case "search":
+        return <SearchPage tenant={tenant} initialQuery={hashQuery()} onQuery={(q) => history.replaceState(null, "", `#/search?q=${encodeURIComponent(q)}`)} />;
       case "alerts": return <AlertRulesManager />;
       case "schedules": return <ReportSchedulesManager />;
       case "custom": return <CustomReportsManager />;
@@ -260,7 +263,10 @@ export default function App() {
             <span className="text-slate-700">/</span>
             <span className="truncate font-medium text-slate-200">{item.label}</span>
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <form className="ml-auto hidden md:block" onSubmit={(e) => { e.preventDefault(); const v = new FormData(e.currentTarget).get("q"); if (typeof v === "string" && v.trim().length >= 2) { window.location.hash = `/search?q=${encodeURIComponent(v.trim())}`; } }}>
+            <input name="q" placeholder="Search users, sites, IPs…" className="w-56 rounded-lg border border-white/10 bg-black/25 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none lg:w-72" />
+          </form>
+          <div className="ml-2 flex items-center gap-2 md:ml-0">
             {showControls && (
               <div className="hidden rounded-lg border border-white/10 bg-black/25 p-0.5 md:flex">
                 {RANGES.map((option) => (

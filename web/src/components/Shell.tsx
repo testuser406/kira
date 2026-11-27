@@ -4,7 +4,7 @@ import { useSession } from "./AuthGate";
 export type PageId =
   | "overview" | "bandwidth" | "productivity" | "security" | "vpn"
   | "reports" | "productivity_report" | "schedules" | "custom"
-  | "events" | "alerts" | "system" | "retention";
+  | "search" | "events" | "alerts" | "system" | "retention";
 
 type NavItem = { id: PageId; label: string; icon: string; title: string; desc: string; range?: boolean };
 export const NAV: { group: string; items: NavItem[] }[] = [
@@ -22,6 +22,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     { id: "custom", label: "Custom Reports", icon: "M12 5v14M5 12h14", title: "Custom Reports", desc: "Saved report definitions with their own filters." },
   ]},
   { group: "Investigation", items: [
+    { id: "search", label: "Search", icon: "M21 21l-4.3-4.3M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm0-10v6m-3-3h6", title: "Search & Timeline", desc: "Find any user, IP, site, application or threat and open a user's activity timeline." },
     { id: "events", label: "Event Explorer", icon: "M21 21l-4.3-4.3M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z", title: "Event Explorer", desc: "Search and filter raw firewall events.", range: true },
   ]},
   { group: "Alerting", items: [
@@ -34,9 +35,14 @@ export const NAV: { group: string; items: NavItem[] }[] = [
 ];
 export const ALL_ITEMS = NAV.flatMap((g) => g.items.map((i) => ({ ...i, group: g.group })));
 
+export function hashQuery(): string {
+  const m = window.location.hash.match(/[?&]q=([^&]*)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
 export function usePage(): [PageId, (p: PageId) => void] {
   const read = (): PageId => {
-    const id = window.location.hash.replace(/^#\/?/, "") as PageId;
+    const id = window.location.hash.replace(/^#\/?/, "").split("?")[0] as PageId;
     return ALL_ITEMS.some((i) => i.id === id) ? id : "overview";
   };
   const [page, setPage] = useState<PageId>(read);

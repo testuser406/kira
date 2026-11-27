@@ -194,6 +194,12 @@ def main():
     st, ex = admin.call("GET", "/api/v1/reports/summary?type=executive&from=1h")
     ev = next((k["value"] for k in ex.get("kpis", []) if k["label"] == "Total events"), 0) if st == 200 else 0
     check("executive summary counts ingested events", ev > 0, f"events={ev}")
+    st, sr = admin.raw("GET", "/api/v1/search?q=zz&days=30")
+    check("global search answers with groups", st == 200 and b'"groups"' in sr, f"{st}")
+    st, _ = admin.raw("GET", "/api/v1/search?q=a")
+    check("search rejects a 1-character term", st == 400, f"{st}")
+    st, tl = admin.raw("GET", "/api/v1/investigate/user?user=nobody&days=7")
+    check("user timeline answers", st == 200 and b'"timeline"' in tl, f"{st}")
     st, xl = admin.raw("GET", "/api/v1/reports/summary?type=executive&from=24h&format=xlsx")
     check("summary XLSX is a zip workbook", st == 200 and xl[:2] == b"PK" and b"xl/workbook.xml" in xl, f"{st} {len(xl)}")
     st, pdf = admin.raw("GET", "/api/v1/reports/summary?type=executive&from=24h&format=pdf")
