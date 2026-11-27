@@ -496,7 +496,9 @@ impl Store {
             &[],
         )
         .await?;
+        let t_ins = starts.elapsed().as_millis();
         tx.execute(Self::ROLLUP_BATCH_SQL, &[]).await?;
+        let t_hour = starts.elapsed().as_millis();
         // Live/report rollups must never cost us the raw events: isolate them in a savepoint.
         {
             let sp = tx.transaction().await?;
@@ -508,12 +510,21 @@ impl Store {
                 }
             }
         }
+        let t_min = starts.elapsed().as_millis();
         if let Err(err) = Self::insert_web_extracts(&mut tx, tenant_id, events).await {
             tracing::error!(%err, "search/video extraction failed; events kept");
         }
+        let t_web = starts.elapsed().as_millis();
         tx.execute(Self::DEVICE_ACTIVITY_BATCH_SQL, &[]).await?;
+        let t_dev = starts.elapsed().as_millis();
         tx.commit().await?;
         tracing::debug!(
+            t_ins,
+            t_hour,
+            t_min,
+            t_web,
+            t_dev,
+            total = starts.elapsed().as_millis(),
             rows = copied,
             elapsed_ms = starts.elapsed().as_millis(),
             "wrote event batch and rollups"
@@ -676,24 +687,29 @@ impl Store {
            count(*) FILTER (WHERE e.action = 'blocked')::bigint,
            COALESCE(sum(e.sent_bytes), 0)::bigint,
            COALESCE(sum(e.recv_bytes), 0)::bigint
-    FROM event_batch e
+    FROM (
+        SELECT tenant_id, ts, action, sent_bytes, recv_bytes, category_group, category, domain,
+               application, fw_rule_name, dst_country, src_ip, threat_name, reason, vpn_tunnel, vpn_user,
+               COALESCE(NULLIF(user_name, ''), host(src_ip)) AS uid,
+               CASE WHEN category_group = 'web' THEN sfos_site(domain) END AS site
+        FROM event_batch
+        WHERE COALESCE(con_event, '') <> 'Start'
+        OFFSET 0 -- keep the planner from re-inlining site/uid into every dimension
+    ) e
     CROSS JOIN LATERAL (
         VALUES
             ('overview', ''),
             ('group', e.category_group),
-            ('users', COALESCE(NULLIF(e.user_name, ''), host(e.src_ip))),
+            ('users', e.uid),
             ('applications', NULLIF(e.application, '')),
             ('categories', CASE WHEN e.category_group = 'web' THEN NULLIF(e.category, '') END),
             ('domains', CASE WHEN e.category_group = 'web' THEN NULLIF(e.domain, '') END),
-            ('sites', CASE WHEN e.category_group = 'web' AND NOT sfos_is_noise_site(sfos_site(e.domain))
-                THEN sfos_site(e.domain) END),
-            ('web_users', CASE WHEN e.category_group = 'web'
-                THEN COALESCE(NULLIF(e.user_name, ''), host(e.src_ip)) END),
-            ('user_sites', CASE WHEN e.category_group = 'web' AND NOT sfos_is_noise_site(sfos_site(e.domain))
-                AND sfos_site(e.domain) IS NOT NULL
-                THEN COALESCE(NULLIF(e.user_name, ''), host(e.src_ip)) || E'\t' || sfos_site(e.domain) END),
+            ('sites', CASE WHEN NOT sfos_is_noise_site(e.site) THEN e.site END),
+            ('web_users', CASE WHEN e.category_group = 'web' THEN e.uid END),
+            ('user_sites', CASE WHEN e.site IS NOT NULL AND NOT sfos_is_noise_site(e.site)
+                THEN e.uid || E'\t' || e.site END),
             ('user_categories', CASE WHEN e.category_group = 'web' AND NULLIF(e.category, '') IS NOT NULL
-                THEN COALESCE(NULLIF(e.user_name, ''), host(e.src_ip)) || E'\t' || e.category END),
+                THEN e.uid || E'\t' || e.category END),
             ('policies', NULLIF(e.fw_rule_name, '')),
             ('countries', NULLIF(e.dst_country, '')),
             ('subnets', CASE WHEN e.src_ip IS NOT NULL AND family(e.src_ip) = 4
@@ -706,8 +722,9 @@ impl Store {
             ('vpn_users', CASE WHEN e.category_group = 'vpn'
                 THEN COALESCE(NULLIF(e.vpn_user, ''), 'unknown') END)
     ) AS d(dimension, key)
-    WHERE d.key IS NOT NULL AND COALESCE(e.con_event, '') <> 'Start'
+    WHERE d.key IS NOT NULL
     GROUP BY e.tenant_id, 2, d.dimension, d.key
+    ORDER BY e.tenant_id, 2, d.dimension, d.key
     ON CONFLICT (tenant_id, bucket, dimension, key) DO UPDATE SET
         events = minute_rollups.events + EXCLUDED.events,
         allowed = minute_rollups.allowed + EXCLUDED.allowed,

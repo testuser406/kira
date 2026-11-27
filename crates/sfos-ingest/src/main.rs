@@ -71,6 +71,9 @@ async fn main() -> Result<()> {
     }
 
     let metrics: SharedMetrics = Arc::new(Metrics::default());
+    metrics
+        .udp_port
+        .store(cfg.udp_addr.port(), std::sync::atomic::Ordering::Relaxed);
     let (tx, rx) = mpsc::channel(cfg.queue_capacity);
 
     let udp = bind_udp(cfg.udp_addr)

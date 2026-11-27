@@ -322,6 +322,7 @@ async fn main() -> Result<()> {
         ))
         .layer(CompressionLayer::new())
         .layer(axum::middleware::from_fn(settings::security_headers))
+        .layer(axum::middleware::from_fn(settings::slow_log))
         .with_state(state);
 
     let listener = TcpListener::bind(addr)

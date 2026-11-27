@@ -255,6 +255,13 @@ switch ($Command) {
         $udp = $null
         for ($w = 0; $w -lt 6 -and -not $udp; $w++) { $udp = Get-NetUDPEndpoint -LocalPort ([int]$sysPort) -ErrorAction SilentlyContinue; if (-not $udp) { Start-Sleep -Seconds 2 } }
         if ($udp) { Ok "UDP $sysPort is listening (PID $(($udp | Select-Object -First 1).OwningProcess))" } else { Bad "UDP $sysPort is not listening" 'start Kira, or another program may own the port: Get-NetUDPEndpoint -LocalPort 5514' }
+        try {
+            $line = netstat -s -p udp 2>$null | Select-String 'Receive Errors'
+            if ($line) {
+                $n = [int64](($line.ToString() -split '=')[-1].Trim())
+                if ($n -gt 0) { Bad "Windows reports $n UDP receive errors (datagrams dropped, buffer full)" 'raise UDP_RCVBUF_MB in kira.env and restart, or send syslog over TCP from Sophos' } else { Ok 'No UDP receive errors reported by Windows' }
+            }
+        } catch { }
         $tcp = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
         if ($tcp) { Ok 'Dashboard TCP 8080 is listening' } else { Bad 'Dashboard TCP 8080 is not listening' 'start Kira and check .runtime\logs\api.err.log' }
 

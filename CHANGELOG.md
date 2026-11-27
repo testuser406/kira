@@ -6,6 +6,16 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [1.2.0]
+
+### Performance
+- Minute-rollup SQL no longer re-evaluates site and user expressions for every dimension: a 5,000-row batch now writes in about 0.35 s instead of 2.7 s. 5,000 events/s sustained with no loss in the load test (previously about 2,000/s).
+
+### Added
+- `os_udp_drops` metric (Linux) and a System-tab diagnosis card when the OS drops syslog packets; the Windows doctor checks `netstat -s -p udp` receive errors.
+- Slow-request log in the API (`SLOW_REQUEST_MS`, default 2000 ms).
+- Per-step write timings at debug level in the collector.
+
 ## [1.1.0]
 
 ### Changed

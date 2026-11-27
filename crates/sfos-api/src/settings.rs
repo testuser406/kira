@@ -98,6 +98,29 @@ pub async fn put_settings(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// Log API requests slower than `SLOW_REQUEST_MS` (default 2000) so slow reports are easy to find.
+pub async fn slow_log(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    static LIMIT_MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    let limit = *LIMIT_MS.get_or_init(|| {
+        std::env::var("SLOW_REQUEST_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2000)
+    });
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let start = std::time::Instant::now();
+    let res = next.run(req).await;
+    let ms = start.elapsed().as_millis();
+    if ms >= limit {
+        tracing::warn!(%method, %path, status = res.status().as_u16(), elapsed_ms = ms as u64, "slow request");
+    }
+    res
+}
+
 /// Baseline browser hardening for every response.
 pub async fn security_headers(
     req: axum::extract::Request,

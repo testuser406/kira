@@ -135,6 +135,12 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<Value>, ApiErr
                     &[r"Select-String -Path .runtime\logs\ingest*.err.log -Pattern 'failed|rollup|dropp' | Select-Object -Last 20", r".\scripts\windows\kira.ps1 stop; .\scripts\windows\kira.ps1 start", "Get-PSDrive C   # free disk space"],
                     &["Check free disk space", "Restart Kira (Start menu > PowerShell > the stop/start commands above)", "Send the error lines from .runtime\\logs to support"]));
             }
+            if g("os_udp_drops") > 0 {
+                hints.push(hint("warn", "The operating system is dropping syslog packets",
+                    &format!("{} UDP datagrams were discarded before Kira could read them (receive buffer full). Logs are being lost.", g("os_udp_drops")),
+                    &["notepad kira.env   # raise UDP_RCVBUF_MB (default 32), then restart", "netstat -s -p udp   # 'Receive Errors' counts drops (Windows)"],
+                    &["Make the firewall send over TCP instead of UDP", "Raise UDP_RCVBUF_MB in kira.env and restart Kira", "If the queue is also full, the database is the bottleneck: check disk speed"]));
+            }
             if m["queue_utilization_percent"].as_f64().unwrap_or(0.0) > 80.0 {
                 hints.push(hint("warn", "Collector queue is almost full",
                     "Logs arrive faster than the database accepts them; events may be dropped.",

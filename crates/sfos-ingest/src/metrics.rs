@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 #[derive(Default)]
 pub struct Metrics {
+    pub udp_port: std::sync::atomic::AtomicU16,
     pub datagrams: AtomicU64,
     pub lines: AtomicU64,
     pub parsed: AtomicU64,
@@ -52,10 +53,45 @@ impl Metrics {
             "queue_capacity": queue_capacity,
             "queue_utilization_percent": queue_utilization_percent,
             "queue_high_water": self.queue_high_water.load(Ordering::Relaxed),
+            "os_udp_drops": os_udp_drops(self.udp_port.load(Ordering::Relaxed)),
             "filtered": self.filtered.load(Ordering::Relaxed),
             "user_resolved": self.user_resolved.load(Ordering::Relaxed),
             "user_ambiguous": self.user_ambiguous.load(Ordering::Relaxed),
         })
+    }
+}
+
+/// Datagrams the operating system dropped before the collector could read them
+/// (receive buffer full). Linux only; `None` where the OS does not expose it per socket.
+pub fn os_udp_drops(port: u16) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut total = 0u64;
+        let mut seen = false;
+        for file in ["/proc/net/udp", "/proc/net/udp6"] {
+            let Ok(text) = std::fs::read_to_string(file) else {
+                continue;
+            };
+            for line in text.lines().skip(1) {
+                let cols: Vec<&str> = line.split_whitespace().collect();
+                let local_port = cols
+                    .get(1)
+                    .and_then(|a| a.rsplit(':').next())
+                    .and_then(|p| u16::from_str_radix(p, 16).ok());
+                if local_port == Some(port) {
+                    if let Some(d) = cols.last().and_then(|d| d.parse::<u64>().ok()) {
+                        total += d;
+                        seen = true;
+                    }
+                }
+            }
+        }
+        seen.then_some(total)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = port;
+        None
     }
 }
 
