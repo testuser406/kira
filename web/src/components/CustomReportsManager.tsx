@@ -6,6 +6,7 @@ import type {
   CustomReportResponse,
   ReportTemplateResponse,
 } from "../types";
+import { ReportBuilderDialog } from "./ReportBuilderDialog";
 import { ReportFilterBuilder } from "./ReportFilterBuilder";
 import { Card, Button, Input, Select, Skeleton } from "./ui";
 
@@ -15,11 +16,6 @@ const CATEGORIES = [
   { value: "user_activity", label: "User Activity" },
   { value: "bandwidth", label: "Bandwidth" },
   { value: "custom", label: "Custom" },
-] as const;
-
-const FORMATS = [
-  { value: "pdf", label: "PDF" },
-  { value: "csv", label: "CSV" },
 ] as const;
 
 export default function CustomReportsManager() {
@@ -38,7 +34,7 @@ export default function CustomReportsManager() {
     category: "custom",
     default_filters: {},
   });
-  const [reportForm, setReportForm] = useState<CreateCustomReport & { id?: string }>({
+  const [, setReportForm] = useState<CreateCustomReport & { id?: string }>({
     name: "",
     template_id: "",
     description: "",
@@ -92,28 +88,21 @@ export default function CustomReportsManager() {
     }
   };
 
-  const handleReportSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const payload: CreateCustomReport = {
-      name: reportForm.name,
-      template_id: reportForm.template_id || undefined,
-      description: reportForm.description || null,
-      filters: reportForm.filters,
-      format: reportForm.format,
-      recipients: reportForm.recipients,
-    };
-    try {
-      if (editingReport && reportForm.id) {
-        await api.updateCustomReport(reportForm.id, payload);
-      } else {
-        await api.createCustomReport(payload);
+  const saveReport = async (payload: CreateCustomReport, runAfter: boolean, id?: string) => {
+    const saved = id ? await api.updateCustomReport(id, payload) : await api.createCustomReport(payload);
+    setOpenReport(false);
+    setEditingReport(null);
+    await load();
+    if (runAfter) {
+      setActiveTab("reports");
+      try {
+        const result = await api.runCustomReport(saved.id);
+        setRunResult(result);
+        setSelectedReport(saved);
+        await load();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Saved, but the report could not be run");
       }
-      setOpenReport(false);
-      setEditingReport(null);
-      setReportForm({ name: "", template_id: "", description: "", filters: {}, format: "pdf", recipients: [] });
-      await load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to save report");
     }
   };
 
@@ -303,55 +292,12 @@ export default function CustomReportsManager() {
       )}
 
       {openReport && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
-          <div className="bg-[#0b1220] border border-white/10 rounded-xl p-6 w-full max-w-3xl my-auto shadow-2xl">
-            <h3 className="text-lg font-semibold text-slate-100 mb-4">
-              {editingReport ? "Edit Custom Report" : "Add Custom Report"}
-            </h3>
-            <form onSubmit={handleReportSubmit} className="space-y-4">
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Name</label>
-                <Input value={reportForm.name} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReportForm({ ...reportForm, name: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Template</label>
-                <Select value={reportForm.template_id ?? ""} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setReportForm({ ...reportForm, template_id: e.target.value })}>
-                  <option value="">None</option>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name} ({t.category})</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Description</label>
-                <Input value={reportForm.description || ""} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReportForm({ ...reportForm, description: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Filters</label>
-                <ReportFilterBuilder
-                  filters={reportForm.filters as Record<string, unknown>}
-                  onChange={(filters) => setReportForm({ ...reportForm, filters })}
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Format</label>
-                <Select value={reportForm.format ?? "pdf"} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setReportForm({ ...reportForm, format: e.target.value as "pdf" | "csv" })}>
-                  {FORMATS.map((f) => (
-                    <option key={f.value} value={f.value}>{f.label}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-500 mb-1">Recipients (comma-separated)</label>
-                <Input placeholder="admin@example.com" value={(reportForm.recipients ?? []).join(",")} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReportForm({ ...reportForm, recipients: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })} />
-              </div>
-              <div className="flex items-center justify-end gap-2">
-                <Button type="button" onClick={() => { setOpenReport(false); setEditingReport(null); }} variant="secondary">Cancel</Button>
-                <Button type="submit">Save Report</Button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <ReportBuilderDialog
+          templates={templates}
+          initial={editingReport}
+          onClose={() => { setOpenReport(false); setEditingReport(null); }}
+          onSubmit={saveReport}
+        />
       )}
 
       {runResult && selectedReport && (

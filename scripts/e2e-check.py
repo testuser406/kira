@@ -275,6 +275,17 @@ def main():
     check("search answers", st == 200 and isinstance(se.get("groups"), list), f"{st} {se}")
     check("search rejects one character", admin.call("GET", "/api/v1/search?q=a")[0] == 400)
 
+    # ---- custom reports and destinations (v1.6)
+    st, cr = admin.call("GET", "/api/v1/reports/custom")
+    check("template-based custom reports are preconfigured", st == 200 and len(cr if isinstance(cr, list) else cr.get("items", [])) >= 10, f"{st}")
+    st, dst = admin.call("GET", "/api/v1/traffic/destinations?minutes=60&unclassified=true")
+    check("destinations list answers", st == 200 and isinstance(dst.get("items"), list), f"{st} {dst}")
+    check("label rejects private address", admin.call("POST", "/api/v1/traffic/labels", {"ip": "10.0.0.1", "app": "x"})[0] == 400)
+    st, _ = admin.call("POST", "/api/v1/traffic/labels", {"ip": "203.0.113.77", "app": "E2E Service", "category": "Custom"})
+    check("manual label saved", st == 200, f"{st}")
+    st, d = admin.call("DELETE", "/api/v1/traffic/labels?ip=203.0.113.77")
+    check("manual label removed", st == 200 and d.get("deleted") == 1, f"{st} {d}")
+
     # ---- share links
     st, sh = admin.call("POST", "/api/v1/reports/share", {"type": "executive", "from": "24h", "format": "pdf", "days": 1})
     check("share link created", st == 200 and sh.get("url", "").startswith("/share/"), f"{st} {sh}")

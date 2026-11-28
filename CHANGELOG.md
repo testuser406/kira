@@ -6,6 +6,14 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [1.6.0]
+
+### Added
+- Traffic classification without DPI: firewall connections the firewall did not name get an application and category from (1) destination labels learned from web-filter lines (address + domain), reverse DNS of the busiest unlabelled public addresses and manual labels, then (2) a built-in port table (DNS, RDP, VPN, QUIC/HTTPS...). Inferred names are marked `classified_by` (`destination` or `port`) in the event attributes. Switches: `CLASSIFY_TRAFFIC` (default true) and `PTR_LOOKUP` (default true; it sends destination IPs to your DNS resolver, turn off if that is unwanted). Migration 0030 adds `ip_labels`.
+- Destinations page (Security group): top destinations with traffic, ports, country and users, filter "only unidentified", and a Label button to name an address by hand (admin). API: `/api/v1/traffic/destinations`, `/api/v1/traffic/labels`.
+- Custom reports are preconfigured from the report templates (one per template, disabled, no schedule); deleting one does not bring it back (migration 0029).
+- New guided custom report dialog: pick a template, period, rows per section, format and e-mail recipients (chips); advanced filters stay optional. Saved reports keep their report type in sync with the chosen filters.
+
 ## [1.5.1]
 
 ### Fixed

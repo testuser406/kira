@@ -1,4 +1,5 @@
 mod config;
+mod labeler;
 mod listener;
 mod metrics;
 mod pipeline;
@@ -149,13 +150,15 @@ async fn main() -> Result<()> {
             }
         });
     }
+    let ip_labels = pipeline::IpLabels::default();
+    labeler::spawn(store.clone(), ip_labels.clone(), cfg.ptr_lookup);
     let writer_task = tokio::spawn(writer::run(
         store.clone(),
         rx,
         cfg.batch_size,
         cfg.batch_ms,
         metrics.clone(),
-        pipeline::Pipeline::new(cfg.pipeline.clone()),
+        pipeline::Pipeline::new(cfg.pipeline.clone()).with_labels(ip_labels),
     ));
     let maintenance_task = tokio::spawn(maintenance(
         store.clone(),

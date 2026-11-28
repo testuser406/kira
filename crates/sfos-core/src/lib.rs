@@ -7,6 +7,7 @@
 //! syslog line into a typed [`Event`] plus an `attrs` map holding everything the
 //! normalized schema does not model explicitly.
 
+pub mod classify;
 pub mod model;
 pub mod parse;
 pub mod webextract;

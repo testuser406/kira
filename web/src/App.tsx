@@ -12,6 +12,7 @@ import { Suspense, lazy } from "react";
 import type { LiveKind } from "./components/LiveMinute";
 const LiveMinuteView = lazy(() => import("./components/LiveMinute").then((m) => ({ default: m.LiveMinuteView })));
 const ReportsPage = lazy(() => import("./components/ReportsPage").then((m) => ({ default: m.ReportsPage })));
+const DestinationsPage = lazy(() => import("./components/DestinationsPage").then((m) => ({ default: m.DestinationsPage })));
 const SecurityPage = lazy(() => import("./components/SecurityPage").then((m) => ({ default: m.SecurityPage })));
 const ProductivityPage = lazy(() => import("./components/ProductivityPage").then((m) => ({ default: m.ProductivityPage })));
 const SystemPage = lazy(() => import("./components/SystemPage").then((m) => ({ default: m.SystemPage })));
@@ -211,6 +212,7 @@ export default function App() {
     switch (page) {
       case "system": return <Suspense fallback={null}><SystemPage /></Suspense>;
       case "reports": return <Suspense fallback={null}><ReportsPage tenant={tenant} /></Suspense>;
+      case "destinations": return <Suspense fallback={null}><DestinationsPage tenant={tenant} /></Suspense>;
       case "security_center": return <Suspense fallback={null}><SecurityPage tenant={tenant} /></Suspense>;
       case "productivity_report": return <Suspense fallback={null}><ProductivityPage tenant={tenant} /></Suspense>;
       case "bandwidth": case "productivity": case "security": case "vpn":

@@ -113,6 +113,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0028_search_keys",
         include_str!("../migrations/0028_search_keys.sql"),
     ),
+    (
+        "0029_seed_custom_reports",
+        include_str!("../migrations/0029_seed_custom_reports.sql"),
+    ),
+    (
+        "0030_ip_labels",
+        include_str!("../migrations/0030_ip_labels.sql"),
+    ),
 ];
 
 /// Dimensions of `hourly_activity` that global search covers (also used to fill `search_keys`).
@@ -482,6 +490,10 @@ impl Store {
             .execute("SELECT seed_default_report_templates($1)", &[&tenant.id])
             .await
             .context("seeding default report templates")?;
+        client
+            .execute("SELECT seed_default_custom_reports($1)", &[&tenant.id])
+            .await
+            .context("seeding default custom reports")?;
         client
             .execute("SELECT seed_default_productivity($1)", &[&tenant.id])
             .await

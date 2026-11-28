@@ -28,6 +28,8 @@ pub struct Config {
     pub max_line: usize,
     pub maintenance_interval_secs: u64,
     pub pipeline: crate::pipeline::PipelineConfig,
+    /// Reverse-DNS the busiest unlabelled destinations (sends those addresses to the DNS server).
+    pub ptr_lookup: bool,
 }
 
 impl Config {
@@ -67,7 +69,9 @@ impl Config {
                 )?,
                 resolve_users: env_bool("RESOLVE_USERS", true)?,
                 ip_user_ttl_secs: env_parse::<i64>("IP_USER_TTL_MINUTES", 240)?.clamp(1, 1440) * 60,
+                classify_traffic: env_bool("CLASSIFY_TRAFFIC", true)?,
             },
+            ptr_lookup: env_bool("PTR_LOOKUP", true)?,
         })
     }
 }

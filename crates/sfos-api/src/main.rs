@@ -11,6 +11,7 @@ mod settings;
 mod share;
 mod summary;
 mod system;
+mod traffic;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -247,6 +248,11 @@ async fn main() -> Result<()> {
             get(security::intel_list)
                 .post(security::intel_add)
                 .delete(security::intel_delete),
+        )
+        .route("/api/v1/traffic/destinations", get(traffic::destinations))
+        .route(
+            "/api/v1/traffic/labels",
+            axum::routing::post(traffic::set_label).delete(traffic::delete_label),
         )
         .route(
             "/api/v1/productivity/guidelines",

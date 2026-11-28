@@ -4,9 +4,10 @@
 //! attribute, using what other lines from the same IP told us).
 
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use anyhow::{bail, Result};
-use sfos_core::Event;
+use sfos_core::{classify, CategoryGroup, Event};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -64,7 +65,13 @@ pub struct PipelineConfig {
     pub drop_noise: Vec<NoiseRule>,
     pub resolve_users: bool,
     pub ip_user_ttl_secs: i64,
+    /// Name firewall connections that have no application (no DPI) from destination labels and
+    /// the port table.
+    pub classify_traffic: bool,
 }
+
+/// Destination address -> (application, category), refreshed in the background.
+pub type IpLabels = Arc<RwLock<HashMap<String, (String, String)>>>;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -89,6 +96,7 @@ pub struct Pipeline {
     cfg: PipelineConfig,
     ips: HashMap<(Uuid, String), Entry>,
     since_purge: usize,
+    labels: IpLabels,
 }
 
 impl Pipeline {
@@ -97,6 +105,39 @@ impl Pipeline {
             cfg,
             ips: HashMap::new(),
             since_purge: 0,
+            labels: IpLabels::default(),
+        }
+    }
+
+    pub fn with_labels(mut self, labels: IpLabels) -> Self {
+        self.labels = labels;
+        self
+    }
+
+    /// Fill `application`/`application_category` on firewall connections the firewall did not
+    /// classify. Learned destination labels win over the port table; the source is recorded in
+    /// `attrs["classified_by"]` so reports can tell inferred from firewall-provided names.
+    fn classify(&self, ev: &mut Event) {
+        if ev.category_group != CategoryGroup::Firewall
+            || ev.application.as_deref().is_some_and(|a| !a.is_empty())
+        {
+            return;
+        }
+        if let Some(ip) = ev.dst_ip.as_deref().filter(|ip| classify::is_public_ip(ip)) {
+            if let Some((app, cat)) = self.labels.read().ok().and_then(|m| m.get(ip).cloned()) {
+                ev.application = Some(app);
+                ev.application_category = Some(cat);
+                ev.attrs
+                    .insert("classified_by".into(), "destination".into());
+                return;
+            }
+        }
+        if let Some(port) = ev.dst_port {
+            if let Some((app, cat)) = classify::service_for_port(ev.protocol.as_deref(), port) {
+                ev.application = Some(app.to_string());
+                ev.application_category = Some(cat.to_string());
+                ev.attrs.insert("classified_by".into(), "port".into());
+            }
         }
     }
 
@@ -105,6 +146,9 @@ impl Pipeline {
     pub fn process(&mut self, tenant: Uuid, ev: &mut Event) -> Outcome {
         if self.cfg.drop_noise.iter().any(|r| r.matches(ev)) {
             return Outcome::Filtered;
+        }
+        if self.cfg.classify_traffic {
+            self.classify(ev);
         }
         if !self.cfg.resolve_users {
             return Outcome::Keep;
@@ -198,6 +242,7 @@ mod tests {
             drop_noise: rules.to_vec(),
             resolve_users: true,
             ip_user_ttl_secs: 3600,
+            classify_traffic: false,
         }
     }
 
@@ -305,5 +350,47 @@ mod tests {
         let mut anon = ev(2, "10.0.0.1", None);
         assert_eq!(p.process(t, &mut anon), Outcome::Keep);
         assert_eq!(p.tracked_ips(), 0);
+    }
+
+    #[test]
+    fn classifies_unnamed_firewall_traffic_by_label_then_port() {
+        let labels = IpLabels::default();
+        labels.write().unwrap().insert(
+            "142.250.1.1".into(),
+            ("YouTube".into(), "Streaming Media".into()),
+        );
+        let mut c = cfg(&[]);
+        c.classify_traffic = true;
+        let mut p = Pipeline::new(c).with_labels(labels);
+        let t = Uuid::nil();
+        let mk = |dst: &str, port: i32, proto: &str| Event {
+            category_group: CategoryGroup::Firewall,
+            dst_ip: Some(dst.into()),
+            dst_port: Some(port),
+            protocol: Some(proto.into()),
+            ..Default::default()
+        };
+        let mut a = mk("142.250.1.1", 443, "TCP");
+        p.process(t, &mut a);
+        assert_eq!(a.application.as_deref(), Some("YouTube"));
+        assert_eq!(
+            a.attrs.get("classified_by").map(String::as_str),
+            Some("destination")
+        );
+        let mut b = mk("8.8.4.4", 443, "UDP");
+        p.process(t, &mut b);
+        assert_eq!(b.application.as_deref(), Some("QUIC"));
+        assert_eq!(
+            b.attrs.get("classified_by").map(String::as_str),
+            Some("port")
+        );
+        // Firewall-provided names are never overwritten; private destinations skip labels.
+        let mut c2 = mk("142.250.1.1", 443, "TCP");
+        c2.application = Some("Netflix".into());
+        p.process(t, &mut c2);
+        assert_eq!(c2.application.as_deref(), Some("Netflix"));
+        let mut d = mk("10.0.0.5", 445, "TCP");
+        p.process(t, &mut d);
+        assert_eq!(d.application.as_deref(), Some("SMB"));
     }
 }

@@ -4,7 +4,7 @@ import { useSession } from "./AuthGate";
 export type PageId =
   | "overview" | "bandwidth" | "productivity" | "security" | "vpn"
   | "reports" | "productivity_report" | "schedules" | "custom"
-  | "security_center" | "search" | "events" | "alerts" | "system" | "retention";
+  | "security_center" | "destinations" | "search" | "events" | "alerts" | "system" | "retention";
 
 type NavItem = { id: PageId; label: string; icon: string; title: string; desc: string; range?: boolean };
 export const NAV: { group: string; items: NavItem[] }[] = [
@@ -23,6 +23,7 @@ export const NAV: { group: string; items: NavItem[] }[] = [
   ]},
   { group: "Security", items: [
     { id: "security_center", label: "Security Center", icon: "M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6l-8-3Zm0 5v4m0 3v.01", title: "Security Center", desc: "Anomalies, brute-force, port scans, threat intelligence and the attack timeline." },
+    { id: "destinations", label: "Destinations", icon: "M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Zm0-8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z", title: "Destinations", desc: "Where unclassified (non-DPI) traffic goes, with learned and manual labels." },
   ]},
   { group: "Investigation", items: [
     { id: "search", label: "Search", icon: "M21 21l-4.3-4.3M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm0-10v6m-3-3h6", title: "Search & Timeline", desc: "Find any user, IP, site, application or threat and open a user's activity timeline." },

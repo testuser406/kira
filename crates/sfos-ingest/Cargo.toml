@@ -21,3 +21,4 @@ tokio-postgres.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid = { version = "1", features = ["v4"] }
+dns-lookup = "2"

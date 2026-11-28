@@ -1965,6 +1965,32 @@ pub async fn list_custom_reports(
     })))
 }
 
+/// The saved subtype column mirrors `filters.report_subtype` when it is a known report type.
+fn report_subtype_from_filters(filters: &serde_json::Value) -> Option<String> {
+    filters
+        .get("report_subtype")
+        .and_then(|v| v.as_str())
+        .filter(|s| SAVED_SUBTYPES.contains(s))
+        .map(String::from)
+}
+
+/// Values the `report_schedules.report_subtype` column accepts (migration 0013).
+const SAVED_SUBTYPES: [&str; 13] = [
+    "user",
+    "department",
+    "safeguarding",
+    "websites_allowed_blocked",
+    "activity_timeline",
+    "internet_searches",
+    "youtube_videos",
+    "online_productivity",
+    "firewall_policy",
+    "security_threat",
+    "network_bandwidth",
+    "vpn_connections",
+    "subnet",
+];
+
 pub async fn create_custom_report(
     State(state): State<AppState>,
     Query(query): Query<serde_json::Value>,
@@ -1991,6 +2017,7 @@ pub async fn create_custom_report(
             filters = merged;
         }
     }
+    let subtype = report_subtype_from_filters(&filters);
     let report = ReportSchedule {
         id: Uuid::new_v4(),
         tenant_id: tenant.id,
@@ -2001,7 +2028,7 @@ pub async fn create_custom_report(
         recipients: payload.recipients.unwrap_or(serde_json::json!([])),
         filters,
         report_type: "custom".to_string(),
-        report_subtype: None,
+        report_subtype: subtype,
         enabled: false,
         last_run: None,
         next_run: None,
@@ -2076,6 +2103,7 @@ pub async fn update_custom_report(
     if !["csv", "pdf", "xlsx"].contains(&format.as_str()) {
         return Err(ApiError::bad_request("format must be csv or pdf"));
     }
+    let new_filters = payload.filters.unwrap_or_else(|| report.filters.clone());
     let updated = ReportSchedule {
         id,
         tenant_id: tenant.id,
@@ -2084,9 +2112,9 @@ pub async fn update_custom_report(
         cron_schedule: report.cron_schedule,
         format,
         recipients: payload.recipients.unwrap_or(report.recipients),
-        filters: payload.filters.unwrap_or(report.filters),
+        filters: new_filters.clone(),
         report_type: "custom".to_string(),
-        report_subtype: report.report_subtype,
+        report_subtype: report_subtype_from_filters(&new_filters).or(report.report_subtype.clone()),
         enabled: report.enabled,
         last_run: report.last_run,
         next_run: report.next_run,
