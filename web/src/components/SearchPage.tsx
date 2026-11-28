@@ -13,8 +13,8 @@ interface Timeline {
   timeline: Point[]; top_sites: Ranked[]; top_categories: Ranked[];
 }
 
-async function get<T>(url: string): Promise<T> {
-  const res = await fetch(url, { credentials: "same-origin" });
+async function get<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, { credentials: "same-origin", signal });
   const ct = res.headers.get("content-type") ?? "";
   if (!ct.includes("json")) throw new Error("API is outdated - stop, rebuild and start Kira");
   const body = await res.json();
@@ -32,25 +32,33 @@ export function SearchPage({ tenant, initialQuery, onQuery }: { tenant: string; 
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
 
-  useEffect(() => { setText(initialQuery); }, [initialQuery]);
+  // Searching is explicit (Enter or the button): one request per search, never per keystroke.
+  const [submitted, setSubmitted] = useState(initialQuery.trim());
+  useEffect(() => { setText(initialQuery); setSubmitted(initialQuery.trim()); }, [initialQuery]);
 
   useEffect(() => {
+    if (submitted.length < 2) { setGroups(null); setError(""); return; }
+    const controller = new AbortController();
+    setLoading(true);
+    get<{ groups: Group[] }>(`/api/v1/search?q=${encodeURIComponent(submitted)}&days=${days}&tenant=${encodeURIComponent(tenant)}`, controller.signal)
+      .then((r) => { setGroups(r.groups); setError(""); onQuery(submitted); })
+      .catch((e: Error) => { if (!controller.signal.aborted) setError(e.message); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [submitted, days, tenant]);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
     const q = text.trim();
-    if (q.length < 2) { setGroups(null); setError(""); return; }
-    const timer = window.setTimeout(() => {
-      setLoading(true);
-      get<{ groups: Group[] }>(`/api/v1/search?q=${encodeURIComponent(q)}&days=${days}&tenant=${encodeURIComponent(tenant)}`)
-        .then((r) => { setGroups(r.groups); setError(""); onQuery(q); })
-        .catch((e: Error) => setError(e.message))
-        .finally(() => setLoading(false));
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [text, days, tenant]);
+    if (q.length < 2) { setError("Type at least two characters, then press Enter."); return; }
+    setError("");
+    setSubmitted(q);
+  };
 
   return (
     <div className="space-y-4">
       <Card className="p-4">
-        <div className="flex flex-wrap items-center gap-3">
+        <form onSubmit={submit} className="flex flex-wrap items-center gap-3">
           <input
             autoFocus
             value={text}
@@ -58,6 +66,9 @@ export function SearchPage({ tenant, initialQuery, onQuery }: { tenant: string; 
             placeholder="Search a user, IP, domain, application, category, rule, country, threat…"
             className="min-w-[260px] flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none"
           />
+          <button type="submit" disabled={loading} className="rounded-lg bg-emerald-500/90 px-3.5 py-2 text-sm font-medium text-black hover:bg-emerald-400 disabled:opacity-50">
+            Search
+          </button>
           <div className="flex rounded-lg border border-white/10 bg-black/25 p-0.5">
             {DAYS.map(([d, label]) => (
               <button key={d} type="button" onClick={() => setDays(d)}
@@ -66,14 +77,14 @@ export function SearchPage({ tenant, initialQuery, onQuery }: { tenant: string; 
               </button>
             ))}
           </div>
-        </div>
+        </form>
         {loading && <p className="mt-2 text-xs text-slate-500">Searching…</p>}
         {error && <p className="mt-2 text-sm text-rose-300">{error}</p>}
       </Card>
 
       {selected && <UserTimeline user={selected} tenant={tenant} days={Math.max(days, 7)} onClose={() => setSelected(null)} />}
 
-      {groups === null && !error && <Empty title="Search everything Kira has seen" hint="Type at least two characters. Results come from the hourly history, up to 400 days." />}
+      {groups === null && !error && <Empty title="Search everything Kira has seen" hint="Type at least two characters and press Enter. Results come from the hourly history, up to 400 days." />}
       {groups && groups.length === 0 && <Empty title="No matches" hint="Try a shorter term or a longer period." />}
       <div className="grid gap-4 lg:grid-cols-2">
         {groups?.map((g) => (

@@ -109,6 +109,25 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0027_security",
         include_str!("../migrations/0027_security.sql"),
     ),
+    (
+        "0028_search_keys",
+        include_str!("../migrations/0028_search_keys.sql"),
+    ),
+];
+
+/// Dimensions of `hourly_activity` that global search covers (also used to fill `search_keys`).
+pub const SEARCH_DIMENSIONS: [&str; 11] = [
+    "users",
+    "sites",
+    "domains",
+    "applications",
+    "categories",
+    "policies",
+    "countries",
+    "subnets",
+    "threats",
+    "threat_sources",
+    "vpn_users",
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -894,7 +913,68 @@ impl Store {
                 &[&(hours.clamp(1, 144) as i32)],
             )
             .await?;
-        Ok(row.get(0))
+        let rolled: i64 = row.get(0);
+        // Keep the search dictionary current (cheap: only the rolled window).
+        client
+            .execute(
+                "INSERT INTO search_keys (tenant_id, dimension, key, last_seen)
+                 SELECT tenant_id, dimension, key, max(hour) FROM hourly_activity
+                 WHERE hour >= now() - make_interval(hours => $1::int) AND dimension = ANY($2)
+                 GROUP BY tenant_id, dimension, key
+                 ON CONFLICT (tenant_id, dimension, key)
+                 DO UPDATE SET last_seen = GREATEST(search_keys.last_seen, EXCLUDED.last_seen)",
+                &[&(hours.clamp(1, 144) as i32), &SEARCH_DIMENSIONS.to_vec()],
+            )
+            .await?;
+        Ok(rolled)
+    }
+
+    /// One-time, low-priority preparation for fast search: fill `search_keys` from the whole
+    /// history (only when empty) and build the per-key index without locking writes.
+    pub async fn prepare_search(&self) -> Result<()> {
+        let client = self.pool.get().await?;
+        let empty: bool = client
+            .query_one("SELECT NOT EXISTS (SELECT 1 FROM search_keys)", &[])
+            .await?
+            .get(0);
+        if empty {
+            let n = client
+                .execute(
+                    "INSERT INTO search_keys (tenant_id, dimension, key, last_seen)
+                     SELECT tenant_id, dimension, key, max(hour) FROM hourly_activity
+                     WHERE dimension = ANY($1) GROUP BY tenant_id, dimension, key
+                     ON CONFLICT (tenant_id, dimension, key)
+                     DO UPDATE SET last_seen = GREATEST(search_keys.last_seen, EXCLUDED.last_seen)",
+                    &[&SEARCH_DIMENSIONS.to_vec()],
+                )
+                .await?;
+            tracing::info!(keys = n, "search dictionary filled");
+        }
+        let state = client
+            .query_opt(
+                "SELECT i.indisvalid FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+                 WHERE c.relname = 'hourly_activity_key_idx'",
+                &[],
+            )
+            .await?;
+        match state.map(|r| r.get::<_, bool>(0)) {
+            Some(true) => {}
+            other => {
+                if other.is_some() {
+                    client
+                        .batch_execute("DROP INDEX IF EXISTS hourly_activity_key_idx")
+                        .await?;
+                }
+                client
+                    .batch_execute(
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS hourly_activity_key_idx
+                         ON hourly_activity (tenant_id, dimension, key, hour)",
+                    )
+                    .await?;
+                tracing::info!("search index ready");
+            }
+        }
+        Ok(())
     }
 
     /// Searches and video views are personal data: keep 90 days.
@@ -927,6 +1007,12 @@ impl Store {
 
     pub async fn drop_old_hourly(&self) -> Result<u64> {
         let client = self.pool.get().await?;
+        client
+            .execute(
+                "DELETE FROM search_keys WHERE last_seen < now() - interval '400 days'",
+                &[],
+            )
+            .await?;
         Ok(client
             .execute(
                 "DELETE FROM hourly_activity WHERE hour < now() - interval '400 days'",

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { fmtBytes, fmtTime } from "../format";
-import type { EventRow } from "../types";
+import type { EventFilters, EventRow } from "../types";
 import { api } from "../api";
 import { ActionBadge, Badge, Card, Spinner } from "./ui";
 
@@ -9,42 +9,52 @@ const GROUPS = ["web", "threat", "firewall", "vpn", "auth", "system", "other"];
 export function EventsTable({
   rows,
   loading,
+  error,
   spanHours,
   rawRetentionHours,
-  query,
-  onQuery,
+  filters,
+  onApply,
   action,
   onAction,
   group,
   onGroup,
   tenant,
   from,
-  user,
-  onUser,
-  category,
-  onCategory,
-  device,
-  onDevice,
+  pageIndex,
+  pageSize,
+  hasMore,
+  onPrev,
+  onNext,
+  onPageSize,
 }: {
   rows: EventRow[];
   loading: boolean;
+  error: string | null;
   spanHours: number;
   rawRetentionHours: number;
-  query: string;
-  onQuery: (value: string) => void;
+  filters: EventFilters;
+  onApply: (value: EventFilters) => void;
   action: string;
   onAction: (value: string) => void;
   group: string;
   onGroup: (value: string) => void;
   tenant: string;
   from: string;
-  user: string;
-  onUser: (value: string) => void;
-  category: string;
-  onCategory: (value: string) => void;
-  device: string;
-  onDevice: (value: string) => void;
+  pageIndex: number;
+  pageSize: number;
+  hasMore: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  onPageSize: (value: number) => void;
 }) {
+  // Typing edits a draft; Enter (or Apply) sends it. Nothing is queried per keystroke.
+  const [draft, setDraft] = useState<EventFilters>(filters);
+  useEffect(() => { setDraft(filters); }, [filters]);
+  const { q: query, user, category, device } = filters;
+  const dirty = draft.q !== filters.q || draft.user !== filters.user || draft.category !== filters.category || draft.device !== filters.device;
+  const apply = () => onApply({ q: draft.q.trim(), user: draft.user.trim(), category: draft.category.trim(), device: draft.device.trim() });
+  const onEnter = (event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter") apply(); };
+  const first = pageIndex * pageSize + 1;
   const [expanded, setExpanded] = useState<number | null>(null);
 
   return (
@@ -53,8 +63,8 @@ export function EventsTable({
           <div>
             <h2 className="text-sm font-semibold tracking-tight text-slate-100">Recent activity</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Latest {rows.length} matching log entries · raw details retained {rawRetentionHours}h
-              {loading ? " · refreshing" : ""}
+              {rows.length === 0 ? "No" : `Entries ${first}-${first + rows.length - 1}`} · newest first · raw details retained {rawRetentionHours}h
+              {loading ? " · loading" : ""}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 pb-1">
@@ -71,30 +81,34 @@ export function EventsTable({
               </svg>
               <input
                 type="search"
-                value={query}
-                onChange={(event) => onQuery(event.target.value)}
+                value={draft.q}
+                onChange={(event) => setDraft({ ...draft, q: event.target.value })}
+                onKeyDown={onEnter}
                 placeholder="User, domain, URL, IP, rule…"
                 className="w-56 rounded-lg border border-white/10 bg-black/30 py-1.5 pl-8 pr-2.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none"
               />
             </div>
             <input
               type="search"
-              value={user}
-              onChange={(event) => onUser(event.target.value)}
+              value={draft.user}
+              onChange={(event) => setDraft({ ...draft, user: event.target.value })}
+              onKeyDown={onEnter}
               placeholder="Filter user"
               className="w-36 rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none"
             />
             <input
               type="search"
-              value={category}
-              onChange={(event) => onCategory(event.target.value)}
+              value={draft.category}
+              onChange={(event) => setDraft({ ...draft, category: event.target.value })}
+              onKeyDown={onEnter}
               placeholder="Filter category"
               className="w-40 rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none"
             />
             <input
               type="search"
-              value={device}
-              onChange={(event) => onDevice(event.target.value)}
+              value={draft.device}
+              onChange={(event) => setDraft({ ...draft, device: event.target.value })}
+              onKeyDown={onEnter}
               placeholder="Filter device"
               className="w-36 rounded-lg border border-white/10 bg-black/30 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-emerald-400/40 focus:outline-none"
             />
@@ -120,6 +134,13 @@ export function EventsTable({
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              onClick={apply}
+              className={`rounded-lg border px-2.5 py-1.5 text-xs ${dirty ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-200" : "border-white/10 bg-white/[0.03] text-slate-300"} hover:text-slate-100`}
+            >
+              Search
+            </button>
             <button
               type="button"
               onClick={async () => {
@@ -207,6 +228,33 @@ export function EventsTable({
             )}
           </tbody>
         </table>
+      </div>
+      {error ? <p role="alert" className="px-5 pt-3 text-xs text-rose-300">{error}</p> : null}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] px-5 py-3 text-xs text-slate-400">
+        <span>
+          Page {pageIndex + 1}
+          {spanHours > rawRetentionHours ? ` · only the last ${rawRetentionHours}h of raw logs is stored; older traffic is in Search and the reports` : ""}
+        </span>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5">
+            Rows
+            <select
+              value={pageSize}
+              onChange={(event) => onPageSize(Number(event.target.value))}
+              className="rounded-lg border border-white/10 bg-[#0b1220] px-1.5 py-1 text-xs text-slate-300"
+            >
+              {[50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <button type="button" onClick={onPrev} disabled={pageIndex === 0 || loading}
+            className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1 text-slate-300 hover:text-slate-100 disabled:opacity-40">
+            Newer
+          </button>
+          <button type="button" onClick={onNext} disabled={!hasMore || loading}
+            className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1 text-slate-300 hover:text-slate-100 disabled:opacity-40">
+            Older
+          </button>
+        </div>
       </div>
     </Card>
   );

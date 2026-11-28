@@ -262,8 +262,8 @@ export default function CustomReportsManager() {
       )}
 
       {openTemplate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#0b1220] border border-white/10 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
+          <div className="bg-[#0b1220] border border-white/10 rounded-xl p-6 w-full max-w-3xl my-auto shadow-2xl">
             <h3 className="text-lg font-semibold text-slate-100 mb-4">
               {editingTemplate ? "Edit Template" : "Add Template"}
             </h3>
@@ -303,8 +303,8 @@ export default function CustomReportsManager() {
       )}
 
       {openReport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#0b1220] border border-white/10 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
+          <div className="bg-[#0b1220] border border-white/10 rounded-xl p-6 w-full max-w-3xl my-auto shadow-2xl">
             <h3 className="text-lg font-semibold text-slate-100 mb-4">
               {editingReport ? "Edit Custom Report" : "Add Custom Report"}
             </h3>
@@ -355,8 +355,8 @@ export default function CustomReportsManager() {
       )}
 
       {runResult && selectedReport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#0b1220] border border-white/10 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
+          <div className="bg-[#0b1220] border border-white/10 rounded-xl p-6 w-full max-w-3xl my-auto shadow-2xl">
             <h3 className="text-lg font-semibold text-slate-100 mb-4">Report Generated</h3>
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">

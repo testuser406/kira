@@ -94,6 +94,15 @@ async fn main() -> Result<()> {
         });
     }
 
+    {
+        let store = store.clone();
+        tokio::spawn(async move {
+            if let Err(err) = store.prepare_search().await {
+                tracing::warn!(%err, "search preparation failed (search falls back to the slow path)");
+            }
+        });
+    }
+
     let metrics: SharedMetrics = Arc::new(Metrics::default());
     metrics
         .udp_port

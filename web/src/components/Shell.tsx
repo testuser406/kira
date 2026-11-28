@@ -74,12 +74,12 @@ export function Sidebar(props: {
     <>
       {mobileOpen && <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={onClose} />}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-white/[0.06] bg-[#060a12] transition-all duration-200 lg:sticky lg:top-0 lg:z-20 lg:h-screen ${
+        className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-white/[0.06] bg-[#060a12] transition-all duration-200 lg:sticky lg:top-0 lg:z-20 lg:h-dvh lg:max-h-dvh ${
           mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         } ${collapsed ? "w-[68px]" : "w-64"}`}
       >
-        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-white/[0.06] px-4">
-          <svg viewBox="0 0 32 32" className="h-7 w-7 shrink-0" aria-hidden="true">
+        <div className={`flex h-14 shrink-0 items-center gap-2.5 border-b border-white/[0.06] ${collapsed ? "justify-center px-0" : "px-4"}`}>
+          <svg viewBox="0 0 32 32" className={`h-7 w-7 shrink-0 ${collapsed ? "mx-auto" : ""}`} aria-hidden="true">
             <path d="M16 2 4 7v9c0 7.2 5.1 12.4 12 14 6.9-1.6 12-6.8 12-14V7L16 2Z" fill="#10b981" />
             <path d="M16 9v9m0 4v.5" stroke="#04110c" strokeWidth="2.4" strokeLinecap="round" />
           </svg>
@@ -90,7 +90,7 @@ export function Sidebar(props: {
             </div>
           )}
         </div>
-        <nav className="flex-1 overflow-y-auto px-2.5 py-3">
+        <nav className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-2.5 py-3 [scrollbar-width:thin]">
           {NAV.map((g) => (
             <div key={g.group} className="mb-4">
               {!collapsed ? (
@@ -106,12 +106,12 @@ export function Sidebar(props: {
                     type="button"
                     title={collapsed ? i.label : undefined}
                     onClick={() => { onNavigate(i.id); onClose(); }}
-                    className={`group relative mb-0.5 flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-[13px] transition ${
+                    className={`group relative mb-0.5 flex w-full items-center gap-3 rounded-lg text-left text-[13px] transition ${collapsed ? "h-11 justify-center px-0" : "px-2.5 py-2"} ${
                       active ? "bg-emerald-400/[0.10] font-medium text-emerald-300" : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-100"
-                    } ${collapsed ? "justify-center" : ""}`}
+                    }`}
                   >
                     {active && <span className="absolute left-0 top-1.5 h-[calc(100%-12px)] w-[3px] rounded-r bg-emerald-400" />}
-                    <Icon d={i.icon} />
+                    <Icon d={i.icon} className={collapsed ? "h-[22px] w-[22px] shrink-0" : "h-[18px] w-[18px] shrink-0"} />
                     {!collapsed && <span className="truncate">{i.label}</span>}
                   </button>
                 );

@@ -6,7 +6,9 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::api::{acquire_query_permit, resolve_tenant, ApiError, AppState};
+use crate::api::{
+    acquire_query_permit, acquire_query_permit_wait, resolve_tenant, ApiError, AppState,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct SearchQuery {
@@ -49,10 +51,11 @@ pub async fn search(
     if term.len() > 100 {
         return Err(ApiError::bad_request("search term is too long"));
     }
-    let _permit = acquire_query_permit(
+    let _permit = acquire_query_permit_wait(
         &state.query_semaphore,
         "search capacity is busy; retry shortly",
-    )?;
+    )
+    .await?;
     let tenant = resolve_tenant(&state, q.tenant.as_deref()).await?;
     let days = q.days.unwrap_or(30).clamp(1, 400);
     let masked = crate::settings::masks_for(&state, &cu).await;
@@ -62,9 +65,44 @@ pub async fn search(
         .map(|(d, _)| (*d).to_string())
         .collect();
     let pattern = format!("%{}%", like_escape(&term));
-    let client = state.store.pool().get().await?;
-    let rows = client
-        .query(
+    let mut client = state.store.pool().get().await?;
+    let tx = client.transaction().await?;
+    // A cancelled browser request does not stop the database; bound the work instead.
+    tx.batch_execute("SET LOCAL statement_timeout = 20000")
+        .await?;
+    // Fast path: match the small key dictionary first, then total only the matched keys.
+    // Before the one-time backfill has run (right after an upgrade) use the full scan.
+    let ready: bool = tx
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM search_keys WHERE tenant_id = $1)",
+            &[&tenant.id],
+        )
+        .await?
+        .get(0);
+    let rows = if ready {
+        tx.query(
+            "WITH cand AS (
+                 SELECT dimension, key FROM (
+                     SELECT dimension, key,
+                            row_number() OVER (PARTITION BY dimension ORDER BY last_seen DESC, key) AS rn
+                     FROM search_keys
+                     WHERE tenant_id = $1 AND dimension = ANY($2) AND key ILIKE $3
+                       AND last_seen > now() - make_interval(days => $4)) c
+                 WHERE rn <= 100)
+             SELECT dimension, key, events, blocked, bytes, last_seen FROM (
+                 SELECT h.dimension, h.key, sum(h.events)::bigint AS events, sum(h.blocked)::bigint AS blocked,
+                        sum(h.bytes_up + h.bytes_down)::bigint AS bytes, max(h.hour) AS last_seen,
+                        row_number() OVER (PARTITION BY h.dimension ORDER BY sum(h.events) DESC, h.key) AS rn
+                 FROM hourly_activity h
+                 JOIN cand c ON c.dimension = h.dimension AND c.key = h.key
+                 WHERE h.tenant_id = $1 AND h.hour > now() - make_interval(days => $4)
+                 GROUP BY h.dimension, h.key) t
+             WHERE rn <= 10 ORDER BY dimension, rn",
+            &[&tenant.id, &dims, &pattern, &days],
+        )
+        .await?
+    } else {
+        tx.query(
             "SELECT dimension, key, events, blocked, bytes, last_seen FROM (
                 SELECT dimension, key, sum(events)::bigint AS events, sum(blocked)::bigint AS blocked,
                        sum(bytes_up + bytes_down)::bigint AS bytes, max(hour) AS last_seen,
@@ -76,7 +114,9 @@ pub async fn search(
              WHERE rn <= 10 ORDER BY dimension, rn",
             &[&tenant.id, &dims, &pattern, &days],
         )
-        .await?;
+        .await?
+    };
+    tx.commit().await?;
     let mut groups: Vec<Value> = Vec::new();
     for (dim, label) in SEARCH_DIMS {
         let items: Vec<Value> = rows

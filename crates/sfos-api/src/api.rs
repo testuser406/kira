@@ -135,6 +135,23 @@ pub(crate) fn acquire_query_permit(
         .map_err(|_| ApiError::unavailable(busy_message))
 }
 
+/// Like `acquire_query_permit`, but queues for a few seconds instead of failing at once, so a
+/// short burst of requests (typing, several dashboards loading) is served rather than rejected.
+pub(crate) async fn acquire_query_permit_wait(
+    query_semaphore: &Arc<Semaphore>,
+    busy_message: &'static str,
+) -> Result<OwnedSemaphorePermit, ApiError> {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        query_semaphore.clone().acquire_owned(),
+    )
+    .await
+    {
+        Ok(Ok(permit)) => Ok(permit),
+        _ => Err(ApiError::unavailable(busy_message)),
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct TenantView {
     slug: String,
@@ -860,16 +877,20 @@ pub struct EventsQuery {
     pub device: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    /// Keyset cursor (the `next` of the previous page): rows strictly older than this event.
+    pub before_ts: Option<DateTime<Utc>>,
+    pub before_id: Option<i64>,
 }
 
 pub async fn events(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _permit = acquire_query_permit(
+    let _permit = acquire_query_permit_wait(
         &state.query_semaphore,
         "event search capacity is busy; retry shortly",
-    )?;
+    )
+    .await?;
     let tenant = resolve_tenant(&state, query.tenant.as_deref()).await?;
     let range = resolve_range(&RangeQuery {
         tenant: query.tenant.clone(),
@@ -914,8 +935,12 @@ pub async fn events(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    let client = state.store.pool().get().await?;
-    let rows = client
+    let mut client = state.store.pool().get().await?;
+    let tx = client.transaction().await?;
+    // A cancelled browser request does not stop the database; bound the work instead.
+    tx.batch_execute("SET LOCAL statement_timeout = 25000")
+        .await?;
+    let rows = tx
         .query(
             "SELECT id, ts, category_group, action, log_type, log_component, device_name,
                     host(src_ip) AS src_ip, host(dst_ip) AS dst_ip, src_port, dst_port,
@@ -943,14 +968,25 @@ pub async fn events(
             AND ($8::text IS NULL OR category ILIKE '%' || $8 || '%'
                  OR COALESCE(category_type, attrs->>'http_category_type', attrs->>'category_type') ILIKE '%' || $8 || '%')
             AND ($9::text IS NULL OR device_name ILIKE '%' || $9 || '%' OR device_id ILIKE '%' || $9 || '%')
+            AND ($12::timestamptz IS NULL OR (ts, id) < ($12, $13))
              ORDER BY ts DESC, id DESC
              LIMIT $10 OFFSET $11",
             &[
                 &tenant.id, &raw_from, &range.to, &q, &action, &group,
-                &user_filter, &category_filter, &device_filter, &limit, &offset,
+                &user_filter, &category_filter, &device_filter, &(limit + 1), &offset,
+                &query.before_ts, &query.before_id.unwrap_or(i64::MAX),
             ],
         )
         .await?;
+    tx.commit().await?;
+    let has_more = rows.len() as i64 > limit;
+    let rows: Vec<_> = rows.into_iter().take(limit as usize).collect();
+    let next = rows.last().map(|r| {
+        json!({
+            "before_ts": r.get::<_, DateTime<Utc>>("ts"),
+            "before_id": r.get::<_, i64>("id"),
+        })
+    });
     let rows: Vec<serde_json::Value> = rows
         .iter()
         .map(|row| {
@@ -988,6 +1024,8 @@ pub async fn events(
         "raw_window_hours": retention_hours,
         "limit": limit,
         "offset": offset,
+        "has_more": has_more,
+        "next": next,
         "rows": rows,
     })))
 }

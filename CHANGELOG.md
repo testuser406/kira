@@ -6,6 +6,15 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [1.5.1]
+
+### Fixed
+- Search no longer reports "busy" while typing: global search and the log filters now run on Enter (or the Search button), one request at a time; requests queue for a few seconds instead of failing, and a slow query is stopped after 20-25 s.
+- Search is much lighter: it matches a small key dictionary (`search_keys`, filled in the background after the upgrade) and totals only the matched keys, using one extra index on `hourly_activity` built without locking writes. Until the one-time fill finishes, the old method is used.
+- Recent activity shows every page, not only the newest: Newer/Older buttons and a page-size choice (50-500). Paging uses the last event as a cursor (no OFFSET scans) and reads the existing raw window, so it adds no log storage. Auto-refresh only re-reads the newest page.
+- Collapsed sidebar: icons keep their full size and stay centred, and the menu scrolls when it is taller than the window.
+- Dialogs (custom reports, alert rules, schedules) scroll when taller than the screen; the custom report dialog is wider.
+
 ## [1.5.0]
 
 ### Added

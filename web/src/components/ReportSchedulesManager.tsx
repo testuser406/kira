@@ -205,8 +205,8 @@ export default function ReportSchedulesManager() {
         </div>
       )}
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#0b1220] border border-white/10 rounded-xl p-6 w-full max-w-md mx-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm">
+          <div className="bg-[#0b1220] border border-white/10 rounded-xl p-6 w-full max-w-md my-auto shadow-2xl">
             <h3 className="text-lg font-semibold text-slate-100 mb-4">
               {editing ? "Edit Report Schedule" : "Add Report Schedule"}
             </h3>

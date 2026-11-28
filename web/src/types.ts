@@ -115,10 +115,24 @@ export interface EventRow {
   message: string | null;
 }
 
+export interface EventCursor {
+  before_ts: string;
+  before_id: number;
+}
+
+export interface EventFilters {
+  q: string;
+  user: string;
+  category: string;
+  device: string;
+}
+
 export interface EventsResponse {
   range: { from: string; to: string };
   limit: number;
   offset: number;
+  has_more: boolean;
+  next: EventCursor | null;
   rows: EventRow[];
 }
 

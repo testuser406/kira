@@ -62,7 +62,7 @@ export const api = {
   events: (
     tenant: string,
     from: string,
-    opts: { q?: string; action?: string; group?: string; user?: string; category?: string; device?: string; limit?: number },
+    opts: { q?: string; action?: string; group?: string; user?: string; category?: string; device?: string; limit?: number; before_ts?: string; before_id?: number },
     signal?: AbortSignal,
   ) => get<EventsResponse>("/events", { tenant, from, ...opts }, signal),
   exportEvents: async (filters: {

@@ -19,6 +19,7 @@ import AlertRulesManager from "./components/AlertRulesManager";
 import ReportSchedulesManager from "./components/ReportSchedulesManager";
 import CustomReportsManager from "./components/CustomReportsManager";
 import { Card, Skeleton, Spinner } from "./components/ui";
+import type { EventCursor, EventFilters } from "./types";
 import { ALL_ITEMS, Icon, Sidebar, UserMenu, hashQuery, usePage, useTheme } from "./components/Shell";
 import { SearchPage } from "./components/SearchPage";
 
@@ -38,15 +39,6 @@ type Tops = {
 };
 
 const EMPTY_TOPS: Tops = { users: [], destinations: [], categories: [], threats: [] };
-
-function useDebounced<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = window.setTimeout(() => setDebounced(value), delayMs);
-    return () => window.clearTimeout(id);
-  }, [value, delayMs]);
-  return debounced;
-}
 
 export default function App() {
   const [tenant, setTenant] = useState("");
@@ -73,16 +65,18 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
-  const [query, setQuery] = useState("");
-  const debouncedQuery = useDebounced(query, 300);
+  // Filters are applied on Enter / Apply, not on every keystroke, so typing never floods the API.
+  const [filters, setFilters] = useState<EventFilters>({ q: "", user: "", category: "", device: "" });
   const [action, setAction] = useState("");
   const [group, setGroup] = useState("");
-  const [user, setUser] = useState("");
-  const debouncedUser = useDebounced(user, 300);
-  const [category, setCategory] = useState("");
-  const debouncedCategory = useDebounced(category, 300);
-  const [device, setDevice] = useState("");
-  const debouncedDevice = useDebounced(device, 300);
+  const [pageSize, setPageSize] = useState(() => {
+    try { const n = Number(localStorage.getItem("kira.pageSize")); return [50, 100, 200, 500].includes(n) ? n : 100; } catch { return 100; }
+  });
+  const [cursors, setCursors] = useState<(EventCursor | null)[]>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsError, setEventsError] = useState<string | null>(null);
 
   const spanHours = useMemo(
     () => RANGES.find((option) => option.id === range)?.hours ?? 24,
@@ -131,20 +125,6 @@ export default function App() {
         const destinations = await api.top(tenant, range, "destinations", 8, controller.signal);
         const categories = await api.top(tenant, range, "categories", 8, controller.signal);
         const threats = await api.top(tenant, range, "threats", 5, controller.signal);
-        const nextEvents = await api.events(
-          tenant,
-          range,
-          {
-            q: debouncedQuery || undefined,
-            action: action || undefined,
-            group: group || undefined,
-            user: debouncedUser || undefined,
-            category: debouncedCategory || undefined,
-            device: debouncedDevice || undefined,
-            limit: 100,
-          },
-          controller.signal,
-        );
         if (controller.signal.aborted) return;
         setOverview(nextOverview);
         setTops({
@@ -153,7 +133,6 @@ export default function App() {
           categories: categories.rows,
           threats: threats.rows,
         });
-        setEvents(nextEvents.rows);
         setError(null);
         setUpdatedAt(new Date());
       } catch (err) {
@@ -173,7 +152,52 @@ export default function App() {
       controller.abort();
       if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
     };
-  }, [tenant, range, tick, debouncedQuery, action, group, debouncedUser, debouncedCategory, debouncedDevice, live, page]);
+  }, [tenant, range, tick, live, page]);
+
+  // Any filter / range / page-size change starts again from the newest page.
+  useEffect(() => {
+    setCursors([null]);
+    setPageIndex(0);
+  }, [tenant, range, filters, action, group, pageSize]);
+
+  // Log entries: one request per page, keyed by the previous page's last event (no OFFSET scans).
+  useEffect(() => {
+    if (!tenant || page !== "events") return;
+    const controller = new AbortController();
+    setEventsLoading(true);
+    const cursor = cursors[pageIndex] ?? null;
+    api.events(
+      tenant,
+      range,
+      {
+        q: filters.q || undefined,
+        action: action || undefined,
+        group: group || undefined,
+        user: filters.user || undefined,
+        category: filters.category || undefined,
+        device: filters.device || undefined,
+        limit: pageSize,
+        before_ts: cursor?.before_ts,
+        before_id: cursor?.before_id,
+      },
+      controller.signal,
+    )
+      .then((r) => {
+        if (controller.signal.aborted) return;
+        setEvents(r.rows);
+        setHasMore(r.has_more);
+        // cursors[i] is where page i starts; keep it in step with what was just read.
+        setCursors((prev) => (r.next ? [...prev.slice(0, pageIndex + 1), r.next] : prev.slice(0, pageIndex + 1)));
+        setEventsError(null);
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setEventsError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => { if (!controller.signal.aborted) setEventsLoading(false); });
+    return () => controller.abort();
+  // Live refresh only re-reads the newest page; older pages stay put while you read them.
+  }, [tenant, range, filters, action, group, pageSize, pageIndex, page, pageIndex === 0 ? tick : 0]);
 
   const refresh = () => setTick((value) => value + 1);
   const hasData = overview !== null;
@@ -209,10 +233,13 @@ export default function App() {
         );
       case "events":
         return (
-          <EventsTable rows={events} loading={refreshing} spanHours={spanHours} rawRetentionHours={meta?.raw_retention_hours ?? 6}
-            query={query} onQuery={setQuery} action={action} onAction={setAction} group={group} onGroup={setGroup}
-            tenant={tenant} from={range} user={user} onUser={setUser} category={category} onCategory={setCategory}
-            device={device} onDevice={setDevice} />
+          <EventsTable rows={events} loading={eventsLoading} error={eventsError} spanHours={spanHours} rawRetentionHours={meta?.raw_retention_hours ?? 6}
+            filters={filters} onApply={setFilters} action={action} onAction={setAction} group={group} onGroup={setGroup}
+            tenant={tenant} from={range}
+            pageIndex={pageIndex} pageSize={pageSize} hasMore={hasMore}
+            onPrev={() => setPageIndex((i) => Math.max(0, i - 1))}
+            onNext={() => setPageIndex((i) => (hasMore ? i + 1 : i))}
+            onPageSize={(n) => { setPageSize(n); try { localStorage.setItem("kira.pageSize", String(n)); } catch { /* ignore */ } }} />
         );
       default:
         if (!hasData) return <DashboardSkeleton />;

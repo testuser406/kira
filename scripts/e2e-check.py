@@ -264,6 +264,17 @@ def main():
     if st in (200, 201) and ru.get("id"):
         admin.call("DELETE", f"/api/v1/alerts/rules/{ru['id']}")
 
+    # ---- paging and search (v1.5.1)
+    st, ev = admin.call("GET", "/api/v1/events?from=24h&limit=1")
+    check("events page has cursor fields", st == 200 and "has_more" in ev and "next" in ev, f"{st} {ev}")
+    if st == 200 and ev.get("has_more") and ev.get("next"):
+        n = ev["next"]
+        st2, ev2 = admin.call("GET", f"/api/v1/events?from=24h&limit=1&before_ts={n['before_ts']}&before_id={n['before_id']}")
+        check("events next page is older and different", st2 == 200 and ev2["rows"] and ev2["rows"][0]["id"] != ev["rows"][0]["id"], f"{st2}")
+    st, se = admin.call("GET", "/api/v1/search?q=ex&days=30")
+    check("search answers", st == 200 and isinstance(se.get("groups"), list), f"{st} {se}")
+    check("search rejects one character", admin.call("GET", "/api/v1/search?q=a")[0] == 400)
+
     # ---- share links
     st, sh = admin.call("POST", "/api/v1/reports/share", {"type": "executive", "from": "24h", "format": "pdf", "days": 1})
     check("share link created", st == 200 and sh.get("url", "").startswith("/share/"), f"{st} {sh}")
