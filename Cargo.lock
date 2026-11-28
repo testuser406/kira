@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "sfos-api"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1570,7 +1570,7 @@ dependencies = [
 
 [[package]]
 name = "sfos-core"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "chrono",
  "serde",
@@ -1579,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "sfos-ingest"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1600,7 +1600,7 @@ dependencies = [
 
 [[package]]
 name = "sfos-store"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "anyhow",
  "bytes",

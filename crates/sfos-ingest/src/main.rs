@@ -82,8 +82,16 @@ async fn main() -> Result<()> {
         .await
         .context("failed to create event partitions")?;
     store.drop_old_partitions(retention_hours).await?;
-    if let Err(err) = store.roll_hourly(144).await {
-        tracing::warn!(%err, "initial hourly rollup failed");
+    // The catch-up rollup can take minutes on a large database. It must not delay binding the
+    // syslog sockets (and the start script gives up on a collector that is not answering), so it
+    // runs in the background; the maintenance loop repeats it every interval anyway.
+    {
+        let store = store.clone();
+        tokio::spawn(async move {
+            if let Err(err) = store.roll_hourly(144).await {
+                tracing::warn!(%err, "initial hourly rollup failed");
+            }
+        });
     }
 
     let metrics: SharedMetrics = Arc::new(Metrics::default());

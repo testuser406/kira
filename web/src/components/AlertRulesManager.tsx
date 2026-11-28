@@ -10,6 +10,10 @@ const CONDITION_TYPES = [
   { value: "user_bandwidth", label: "Single user bandwidth (bytes/hour)" },
   { value: "site_visits", label: "Site visits (site:count/hour)" },
   { value: "no_logs", label: "No logs received (minutes)" },
+  { value: "anomaly", label: "Behaviour anomaly (min findings/hour)" },
+  { value: "bruteforce", label: "Brute-force attempt (min findings/hour)" },
+  { value: "portscan", label: "Port scan (min findings/hour)" },
+  { value: "intel_match", label: "Threat-intel match (min findings/hour)" },
 ] as const;
 
 const HINTS: Record<string, string> = {
@@ -19,6 +23,10 @@ const HINTS: Record<string, string> = {
   user_bandwidth: "Bytes by one user in the last hour, e.g. 2000000000",
   site_visits: "site:count, e.g. facebook.com:200",
   no_logs: "Minutes of silence, e.g. 15",
+  anomaly: "Unacknowledged findings in the last hour, e.g. 1",
+  bruteforce: "Unacknowledged findings in the last hour, e.g. 1",
+  portscan: "Unacknowledged findings in the last hour, e.g. 1",
+  intel_match: "Unacknowledged findings in the last hour, e.g. 1",
 };
 
 const SEVERITIES = ["low", "medium", "high", "critical"] as const;

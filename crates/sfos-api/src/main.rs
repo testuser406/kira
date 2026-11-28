@@ -6,6 +6,7 @@ mod live;
 mod productivity;
 mod query;
 mod report;
+mod security;
 mod settings;
 mod share;
 mod summary;
@@ -190,6 +191,25 @@ async fn main() -> Result<()> {
         }
     });
 
+    // Security detectors (anomalies, brute-force, port-scan, threat-intel): every 5 minutes.
+    let security_state = state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(90)).await;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            match security_state.store.list_tenants().await {
+                Ok(tenants) => {
+                    for tenant in tenants {
+                        security::run_detectors(&security_state, tenant.id, Utc::now()).await;
+                    }
+                }
+                Err(e) => tracing::error!(%e, "security detectors: failed to list tenants"),
+            }
+        }
+    });
+
     let index = web_dir.join("index.html");
     let static_files = ServeDir::new(&web_dir).fallback(ServeFile::new(&index));
     let app = Router::new()
@@ -216,6 +236,18 @@ async fn main() -> Result<()> {
         .route("/api/v1/search", get(investigate::search))
         .route("/api/v1/investigate/user", get(investigate::user_timeline))
         .route("/api/v1/productivity/summary", get(productivity::summary))
+        .route("/api/v1/security/summary", get(security::summary))
+        .route("/api/v1/security/findings", get(security::findings))
+        .route(
+            "/api/v1/security/findings/{id}/ack",
+            axum::routing::post(security::ack_finding),
+        )
+        .route(
+            "/api/v1/security/intel",
+            get(security::intel_list)
+                .post(security::intel_add)
+                .delete(security::intel_delete),
+        )
         .route(
             "/api/v1/productivity/guidelines",
             get(productivity::list_guidelines)

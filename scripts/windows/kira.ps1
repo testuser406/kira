@@ -193,7 +193,7 @@ switch ($Command) {
         for ($try = 1; $try -le 3; $try++) {
             Start-KiraProcess 'ingest' $ingest 'ingest'
             $up = $false
-            for ($i = 0; $i -lt 40; $i++) {
+            for ($i = 0; $i -lt 180; $i++) {
                 Start-Sleep -Milliseconds 500
                 try { Invoke-RestMethod "http://127.0.0.1:$hp/metrics" -TimeoutSec 2 | Out-Null; $up = $true; break } catch { }
                 $pidFile = Join-Path $Pids 'ingest.pid'
@@ -201,9 +201,15 @@ switch ($Command) {
                 if (-not $alive) { break }
             }
             if ($up) { break }
-            Write-Warning "Collector did not come up (attempt $try of 3). Last lines of .runtime\logs\ingest.err.log:"
-            $errLog = Join-Path $Logs 'ingest.err.log'
-            if (Test-Path $errLog) { Get-Content $errLog -Tail 8 | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow } }
+            Write-Warning "Collector did not come up (attempt $try of 3). Log tails (tracing output is in ingest.out.log, crashes in ingest.err.log):"
+            foreach ($lf in 'ingest.out.log', 'ingest.err.log') {
+                $lp = Join-Path $Logs $lf
+                Write-Host "  --- $lf" -ForegroundColor Yellow
+                if (Test-Path $lp) { Get-Content $lp -Tail 12 | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow } }
+            }
+            $dead = (Test-Path $pidFile) -and -not (Get-Process -Id ([int](Get-Content $pidFile -Raw)) -ErrorAction SilentlyContinue)
+            if ($dead) { Write-Host '  The collector process exited by itself (see logs above). If both logs are empty, run it in the foreground: .\target\release\sfos-ingest.exe' -ForegroundColor Yellow }
+            else { Write-Host '  The collector was still starting (database busy or migrating) after 90 s; check ingest.out.log.' -ForegroundColor Yellow }
             Stop-KiraProcess 'ingest'
             Start-Sleep -Seconds 3
         }
@@ -318,9 +324,9 @@ switch ($Command) {
         } else { Warn 'psql or database password not found; skipped' }
 
         Write-Host "`n6. Recent errors in logs"
-        $hits = Get-ChildItem $Logs -Filter '*.err.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object { Select-String -Path $_.FullName -Pattern 'ERROR|failed|panick|cannot bind|dropp' | Select-Object -Last 5 }
+        $hits = Get-ChildItem $Logs -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(ingest|api)\.(out|err)\.log$' } | ForEach-Object { Select-String -Path $_.FullName -Pattern 'ERROR|WARN|failed|panick|cannot bind|dropp|retrying' | Select-Object -Last 4 }
         if ($hits) { $hits | ForEach-Object { Write-Host "  $($_.Filename): $($_.Line.Substring(0, [math]::Min(200, $_.Line.Length)))" -ForegroundColor Yellow } } else { Ok 'no recent errors' }
-        $cidr = Get-ChildItem $Logs -Filter 'ingest*.err.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { Select-String -Path $_.FullName -Pattern 'invalid CIDR' | Select-Object -Last 1 }
+        $cidr = Get-ChildItem $Logs -Filter 'ingest*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 2 | ForEach-Object { Select-String -Path $_.FullName -Pattern 'invalid CIDR' | Select-Object -Last 1 }
         if ($cidr) { Bad 'kira.env has an invalid ALLOWED_SOURCES value, so the collector refuses to start' 'edit kira.env: ALLOWED_SOURCES must be IPs/CIDRs separated by commas (e.g. 172.16.0.210), then run kira.ps1 start' }
         $d = Get-PSDrive -Name ($Root.Substring(0, 1)) -ErrorAction SilentlyContinue
         if ($d -and $d.Free -lt 2GB) { Bad ("only {0:N1} GB free on {1}:" -f ($d.Free / 1GB), $d.Name) 'free disk space; PostgreSQL stops writing when the disk is full' }

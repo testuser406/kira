@@ -6,6 +6,22 @@ versions is the release roadmap (v1.0.0 = Fastvue Reporter parity from firewall 
 
 ## [Unreleased]
 
+## [1.5.0]
+
+### Added
+- Security Center page: attack timeline (threat events per hour by detection type: IPS, anti-virus, ATP, WAF and others), top threats and sources, open findings by severity, and a destination map (bubble map by country).
+- Detectors every 5 minutes, results stored as findings you can acknowledge (migration 0027): traffic spike per user (mean + 4 sigma of the last 14 days), new country, new host and unusual hours (from `hourly_activity` baselines, need about a week of history), brute-force logins and password spraying, port and host scans.
+- Threat-intel indicators: paste IPs/domains (hosts-file, CSV and URL lines accepted) or import a feed URL; traffic to or from a listed IP or domain raises a high-severity finding.
+- Alert rule conditions `anomaly`, `bruteforce`, `portscan` and `intel_match`, delivered through the existing e-mail/webhook notifications.
+- New `threat_types` rollup dimension (log type of threat events); it fills from the upgrade onwards.
+
+### Fixed
+- Collector did not start on a database with a lot of history (Windows doctor: "ingest is not running", empty `ingest.err.log`). The catch-up hourly rollup ran before the syslog sockets were bound, took longer than the start script waited (20 s), and was killed every time. It now runs in the background, `start` waits up to 90 s, and `start`/`doctor` show both `ingest.out.log` (where the collector writes its log) and `ingest.err.log`.
+
+### Notes
+- Masked viewers see findings with subjects hidden and no attack sources.
+- Feed import is manual; scheduled feed refresh and a real world-outline map are planned.
+
 ## [1.4.0]
 
 ### Added

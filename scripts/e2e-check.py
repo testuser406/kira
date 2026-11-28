@@ -246,6 +246,24 @@ def main():
     st, csv_ = admin.raw("GET", "/api/v1/audit?limit=10&format=csv")
     check("audit log exports as CSV", st == 200 and csv_.startswith(b"time,user"), str(st))
 
+    # ---- security analytics (v1.5)
+    st, sec = admin.call("GET", "/api/v1/security/summary?hours=24")
+    check("security summary", st == 200 and "threat_events" in sec and "timeline" in sec and "countries" in sec, f"{st} {sec}")
+    st, fd = admin.call("GET", "/api/v1/security/findings?status=all")
+    check("security findings list", st == 200 and isinstance(fd.get("findings"), list), f"{st}")
+    st, ia = admin.call("POST", "/api/v1/security/intel", {"text": "198.51.100.250\n# c\nbad-e2e.example\nnot valid", "source": "e2e"})
+    check("intel import", st == 200 and ia.get("added") == 2, f"{st} {ia}")
+    st, il = admin.call("GET", "/api/v1/security/intel?limit=10")
+    check("intel list", st == 200 and il.get("total", 0) >= 2, f"{st}")
+    check("intel rejects garbage", admin.call("POST", "/api/v1/security/intel", {"text": "nonsense"})[0] == 400)
+    check("intel delete", admin.call("DELETE", "/api/v1/security/intel?indicator=bad-e2e.example")[0] == 200
+          and admin.call("DELETE", "/api/v1/security/intel?indicator=198.51.100.250")[0] == 200)
+    st, ru = admin.call("POST", "/api/v1/alerts/rules", {"name": "e2e-bruteforce", "condition_type": "bruteforce",
+                                                         "threshold": "1", "severity": "high", "cooldown_minutes": 60, "enabled": False})
+    check("alert rule accepts security conditions", st in (200, 201), f"{st} {ru}")
+    if st in (200, 201) and ru.get("id"):
+        admin.call("DELETE", f"/api/v1/alerts/rules/{ru['id']}")
+
     # ---- share links
     st, sh = admin.call("POST", "/api/v1/reports/share", {"type": "executive", "from": "24h", "format": "pdf", "days": 1})
     check("share link created", st == 200 and sh.get("url", "").startswith("/share/"), f"{st} {sh}")

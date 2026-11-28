@@ -4,7 +4,7 @@ import { useSession } from "./AuthGate";
 export type PageId =
   | "overview" | "bandwidth" | "productivity" | "security" | "vpn"
   | "reports" | "productivity_report" | "schedules" | "custom"
-  | "search" | "events" | "alerts" | "system" | "retention";
+  | "security_center" | "search" | "events" | "alerts" | "system" | "retention";
 
 type NavItem = { id: PageId; label: string; icon: string; title: string; desc: string; range?: boolean };
 export const NAV: { group: string; items: NavItem[] }[] = [
@@ -20,6 +20,9 @@ export const NAV: { group: string; items: NavItem[] }[] = [
     { id: "productivity_report", label: "Productivity", icon: "M4 20V10m6 10V4m6 16v-7m6 7H2", title: "Productivity", desc: "Browsing time, categories and Site Clean." },
     { id: "schedules", label: "Scheduled Reports", icon: "M8 3v4m8-4v4M4 9h16M5 5h14v16H5V5Z", title: "Scheduled Reports", desc: "Reports delivered automatically by e-mail or webhook." },
     { id: "custom", label: "Custom Reports", icon: "M12 5v14M5 12h14", title: "Custom Reports", desc: "Saved report definitions with their own filters." },
+  ]},
+  { group: "Security", items: [
+    { id: "security_center", label: "Security Center", icon: "M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6l-8-3Zm0 5v4m0 3v.01", title: "Security Center", desc: "Anomalies, brute-force, port scans, threat intelligence and the attack timeline." },
   ]},
   { group: "Investigation", items: [
     { id: "search", label: "Search", icon: "M21 21l-4.3-4.3M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm0-10v6m-3-3h6", title: "Search & Timeline", desc: "Find any user, IP, site, application or threat and open a user's activity timeline." },

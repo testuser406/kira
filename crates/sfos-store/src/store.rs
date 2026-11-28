@@ -105,6 +105,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0026_xlsx_format",
         include_str!("../migrations/0026_xlsx_format.sql"),
     ),
+    (
+        "0027_security",
+        include_str!("../migrations/0027_security.sql"),
+    ),
 ];
 const MIGRATION_LOCK: i64 = 0x5346_4f53; // "SFOS"
 
@@ -693,7 +697,7 @@ impl Store {
            COALESCE(sum(e.recv_bytes), 0)::bigint
     FROM (
         SELECT tenant_id, ts, action, sent_bytes, recv_bytes, category_group, category, domain,
-               application, fw_rule_name, dst_country, src_ip, threat_name, reason, vpn_tunnel, vpn_user,
+               application, fw_rule_name, dst_country, src_ip, threat_name, reason, vpn_tunnel, vpn_user, log_type,
                COALESCE(NULLIF(user_name, ''), host(src_ip)) AS uid,
                CASE WHEN category_group = 'web' THEN sfos_site(domain) END AS site
         FROM event_batch
@@ -721,6 +725,7 @@ impl Store {
             ('threats', CASE WHEN e.category_group = 'threat'
                 THEN COALESCE(NULLIF(e.threat_name, ''), NULLIF(e.reason, '')) END),
             ('threat_sources', CASE WHEN e.category_group = 'threat' THEN host(e.src_ip) END),
+            ('threat_types', CASE WHEN e.category_group = 'threat' THEN NULLIF(e.log_type, '') END),
             ('vpn_tunnels', CASE WHEN e.category_group = 'vpn'
                 THEN COALESCE(NULLIF(e.vpn_tunnel, ''), 'unknown') END),
             ('vpn_users', CASE WHEN e.category_group = 'vpn'

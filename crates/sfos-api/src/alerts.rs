@@ -10,13 +10,17 @@ use uuid::Uuid;
 
 use crate::api::{send_email, ApiError, AppState};
 
-pub const CONDITIONS: [&str; 6] = [
+pub const CONDITIONS: [&str; 10] = [
     "threat",
     "blocked_category",
     "large_transfer",
     "user_bandwidth",
     "site_visits",
     "no_logs",
+    "anomaly",
+    "bruteforce",
+    "portscan",
+    "intel_match",
 ];
 
 /// Returns a message when the rule's condition holds right now.
@@ -103,6 +107,16 @@ pub async fn check(
                     site.trim()
                 )
             })
+        }
+        "anomaly" | "bruteforce" | "portscan" | "intel_match" => {
+            let kinds: &[&str] = match rule.condition_type.as_str() {
+                "anomaly" => &crate::security::ANOMALY_KINDS,
+                "bruteforce" => &["brute_force"],
+                "portscan" => &["port_scan"],
+                _ => &crate::security::INTEL_KINDS,
+            };
+            crate::security::alert_message(client, tenant, kinds, num(&rule.threshold, 1), now)
+                .await?
         }
         "no_logs" => {
             let mins = num(&rule.threshold, 15).max(1);
